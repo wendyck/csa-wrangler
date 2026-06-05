@@ -216,3 +216,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- csa-wrangler: never commit subscription cookies or recipe data ---
+cookies.txt
+*cookies*.txt
+*-curl.txt
+cooking_recipes.*
+recipes_enriched.json
+recipes_tagged.json
+paywalled_worklist.csv
+needs_manual*.csv
+add_failures.csv
