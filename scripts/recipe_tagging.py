@@ -62,6 +62,38 @@ _BROTH = re.compile(
     r"reduced-sodium|no-salt-added|homemade|store-bought)[ ,]+(?:or +)?)+"
     r"(?:broth|stock|bouillon|base)\b")
 
+# dish_type: distinguish a standalone dinner ("main") from an accompaniment ("side").
+# Anything with a real protein or pasta is a main. The hard cases are vegetarian,
+# non-pasta dishes, decided by title/ingredient signals.
+_MAIN_SIGNAL = re.compile(
+    r"\b(?:soup|stew|chili|chilli|curry|risotto|paella|biryani|pilaf|jambalaya|"
+    r"fried rice|ramen|pho|laksa|pad thai|lo mein|chow mein|dal|dahl|daal|"
+    r"shakshuka|frittata|quiche|strata|omelet|omelette|casserole|pot pie|"
+    r"enchilada|taco|burrito|quesadilla|tostada|pizza|sandwich|burger|sub|gyro|"
+    r"bowl|chickpea|lentil|tofu|tempeh|dumpling|pierogi|polenta|congee|"
+    r"hash|tart|galette|flatbread|baked? potato|stuffed|gratin|bake\b)\b")
+_SIDE_SIGNAL = re.compile(
+    r"\b(?:roast(?:ed)?|glazed|creamed|saut[eé]ed|braised|steamed|blistered|"
+    r"charred|grilled|smashed|mashed|scalloped|slaw|pickled|marinated|buttered|"
+    r"honey|maple|crispy|wedges|fries|chips|salad)\b")
+_HEARTY = re.compile(  # a substantial base => likely a main even if vegetarian
+    r"\b(?:rice|noodles?|pasta|beans?|lentils?|chickpeas?|quinoa|farro|barley|"
+    r"bulgur|couscous|tortillas?|bread|eggs?|gnocchi|orzo|polenta)\b")
+
+def _dish_type(rec, protein, is_pasta, veggies):
+    if protein != "vegetarian" or is_pasta:
+        return "main"
+    blob = " ; ".join(rec.get("ingredients", [])).lower() + " " + rec.get("title", "").lower()
+    title = rec.get("title", "").lower()
+    if _MAIN_SIGNAL.search(title) or _MAIN_SIGNAL.search(blob):
+        return "main"
+    if _SIDE_SIGNAL.search(title):
+        return "side"
+    # fallback: a hearty base => main; a short veg-centric prep => side
+    if _HEARTY.search(blob):
+        return "main"
+    return "side" if len(rec.get("ingredients", [])) <= 8 else "main"
+
 def tag(rec):
     blob = " ; ".join(rec.get("ingredients", [])).lower() + " " + rec.get("title", "").lower()
     veggies = sorted({c for c, pat in _VEG_C.items() if pat.search(blob)})
@@ -69,4 +101,6 @@ def tag(rec):
     found = [p for p, pat in _PROT_C.items() if pat.search(pblob)]
     mains = [p for p in found if p not in FLAVORING]
     protein = mains[0] if mains else (found[0] if found else "vegetarian")
-    return veggies, protein, bool(PASTA.search(blob))
+    is_pasta = bool(PASTA.search(blob))
+    return {"veggies": veggies, "protein": protein, "is_pasta": is_pasta,
+            "dish_type": _dish_type(rec, protein, is_pasta, veggies)}
