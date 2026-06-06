@@ -23,7 +23,7 @@ CSA email  ──►  Gmail filter forwards  ──►  plan@csa.<domain>
 ## What it does
 
 1. **Receive** — your CSA emails arrive at a Workspace address; a Gmail filter forwards them
-   to `plan@csa.<your-domain>`. A dedicated subdomain (e.g. `csa.wendyk.org`) is verified in
+   to `plan@csa.<your-domain>`. A dedicated subdomain (e.g. `csa.<your-domain>`) is verified in
    SES with its own MX, so your real mail keeps flowing through Workspace untouched.
 2. **Parse** — the Lambda reads the raw MIME from S3, extracts the `Share contents:` line,
    and normalizes each item to a canonical vegetable vocabulary (e.g. `lacinato kale` → `kale`,
