@@ -84,5 +84,7 @@ def test_real_week_render_smoke(corpus):
     plan = planner.build_plan(["carrot", "tomato", "kale"], corpus, recent_ids=set(), nights=6)
     html = render.render_html(plan, ["carrot", "tomato", "kale"], week_label="CSA Week Test")
     assert html.startswith("<!DOCTYPE html>")
-    assert html.count('<section class="day">') == 6
+    assert html.count('class="day"') == 6
     assert "Grocery List" in html
+    assert render._ACCENT in html and render._PAGE_BG in html  # literal palette, not CSS vars
+    assert "var(--" not in html                    # Gmail ignores CSS variables

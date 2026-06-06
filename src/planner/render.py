@@ -153,52 +153,20 @@ def _esc(s):
     return html.escape(s or "")
 
 
-_CSS = """
- :root{--ink:#23201c;--muted:#7a736a;--line:#e7e1d8;--accent:#9c5b34;--bg:#faf7f2;}
- *{box-sizing:border-box}
- body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:var(--ink);
-      background:var(--bg);margin:0;line-height:1.5;}
- .wrap{max-width:820px;margin:0 auto;padding:32px 20px 64px;}
- h1{font-size:30px;margin:0 0 4px;letter-spacing:-.4px;}
- .sub{color:var(--muted);margin:0 0 28px;font-size:15px;}
- .day{margin:0 0 26px;background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;
-      box-shadow:0 1px 3px rgba(0,0,0,.04);}
- .day h2{margin:0;padding:12px 18px;font-size:14px;text-transform:uppercase;letter-spacing:1.5px;
-      color:#fff;background:var(--accent);}
- .card{display:flex;padding:18px;flex-wrap:wrap;}
- /* margin (not flex `gap`) — Gmail strips gap but keeps margins, so this guarantees
-    space between the photo and the text. */
- .card img{width:210px;height:150px;object-fit:cover;border-radius:10px;background:#eee;
-      flex:0 0 auto;margin:0 18px 0 0;}
- .noimg{width:210px;height:150px;border-radius:10px;background:#efe9df;flex:0 0 auto;display:flex;
-      align-items:center;justify-content:center;color:#b8ad9c;font-size:13px;letter-spacing:1px;
-      margin:0 18px 0 0;}
- .meta{flex:1;min-width:240px;}
- .meta h3{margin:2px 0 4px;font-size:20px;}
- .tag{color:var(--muted);font-size:13px;margin:0 0 10px;}
- .links a{display:inline-block;margin:0 14px 6px 0;font-size:14px;color:var(--accent);text-decoration:none;
-      border-bottom:1px solid rgba(156,91,52,.35);}
- .links a:hover{border-color:var(--accent);}
- details{margin-top:8px;}
- summary{cursor:pointer;color:var(--muted);font-size:13px;}
- .ings{margin:8px 0 0;padding-left:18px;font-size:13.5px;color:#46413a;}
- .ings li{margin:2px 0;}
- .side{margin:10px 0 0;padding:8px 12px;background:#f3eee5;border-radius:8px;font-size:13.5px;color:#5a5249;}
- .side .lbl{color:var(--accent);font-weight:600;text-transform:uppercase;letter-spacing:.5px;font-size:11.5px;}
- .side a{color:var(--accent);text-decoration:none;border-bottom:1px solid rgba(156,91,52,.35);}
- .grocery{margin-top:42px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 24px;}
- .grocery h2{margin:0 0 4px;font-size:23px;}
- .grocery .note{color:var(--muted);font-size:13px;margin:0 0 18px;}
- .gcat{margin:0 0 18px;}
- .gcat h3{margin:0 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--accent);
-      border-bottom:1px solid var(--line);padding-bottom:4px;}
- .gcat ul{margin:8px 0 0;padding-left:18px;column-count:2;column-gap:28px;font-size:13.5px;}
- .gcat li{margin:3px 0;break-inside:avoid;}
- .pantry{background:#f3eee5;border-radius:10px;padding:14px 18px;}
- .pantry h3{color:#7a5a2a;}
- @media print{body{background:#fff}.day,.grocery{box-shadow:none}details{display:none}}
- @media(max-width:560px){.gcat ul{column-count:1}.card img,.noimg{width:100%;height:200px;margin:0 0 14px 0}}
-"""
+# Palette (literal hex — email clients, notably Gmail, ignore CSS `var()`).
+_INK = "#23201c"
+_MUTED = "#7a736a"
+_LINE = "#e7e1d8"
+_ACCENT = "#9c5b34"          # day headers + links
+_PAGE_BG = "#faf7f2"         # cream page background
+_SIDE_BG = "#f3eee5"
+_LINK = f"color:{_ACCENT};text-decoration:none;border-bottom:1px solid rgba(156,91,52,.35);"
+
+# Progressive enhancement only: stack the photo above the text on narrow screens.
+# Inline styles below carry the actual look; this just improves mobile where supported.
+_MOBILE_CSS = ("@media only screen and (max-width:560px){"
+               ".ph,.mt{display:block!important;width:100%!important;padding-right:0!important}"
+               ".ph .photo{width:100%!important;height:200px!important;margin:0 0 12px 0!important}}")
 
 
 def _side_block(side, week_veggies):
@@ -208,63 +176,116 @@ def _side_block(side, week_veggies):
     uses = [v for v in side.get("veggies", []) if v in set(week_veggies)]
     uses_txt = (" — uses your " + " &amp; ".join(_esc(v) for v in uses)) if uses else ""
     url = side.get("recipe_url")
-    title = ('<a href="' + _esc(url) + '" target="_blank">' + _esc(side.get("title")) + " &rarr;</a>"
-             ) if url else _esc(side.get("title"))
-    return ('<div class="side"><span class="lbl">Suggested side</span><br>' + title + uses_txt + "</div>")
+    name = (f'<a href="{_esc(url)}" target="_blank" style="{_LINK}">{_esc(side.get("title"))} &rarr;</a>'
+            if url else _esc(side.get("title")))
+    return (f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
+            f'style="margin-top:12px;"><tr><td style="background:{_SIDE_BG};border-radius:8px;'
+            f'padding:8px 12px;font-size:13.5px;color:#5a5249;line-height:1.5;">'
+            f'<span style="color:{_ACCENT};font-weight:600;text-transform:uppercase;letter-spacing:.5px;'
+            f'font-size:11.5px;">Suggested side</span><br>{name}{uses_txt}</td></tr></table>')
+
+
+def _grocery_category(label, items, pantry=False):
+    """One grocery category as a self-contained table (so backgrounds render in email)."""
+    cell_bg = f"background:{_SIDE_BG};border-radius:10px;padding:14px 18px;" if pantry else ""
+    head_color = "#7a5a2a" if pantry else _ACCENT
+    parts = [f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
+             f'style="margin:0 0 16px;"><tr><td style="{cell_bg}">'
+             f'<h3 style="margin:0 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:1px;'
+             f'color:{head_color};border-bottom:1px solid {_LINE};padding-bottom:4px;">{label}</h3>'
+             '<ul style="margin:8px 0 0;padding-left:18px;font-size:13.5px;color:#46413a;">']
+    parts += [f'<li style="margin:3px 0;">{_esc(x)}</li>' for x in items]
+    parts.append("</ul></td></tr></table>")
+    return "".join(parts)
 
 
 def render_html(plan, week_veggies, week_label="This Week's Dinners"):
-    """Build the full HTML email from a planner.build_plan() result."""
+    """Build the HTML email from a planner.build_plan() result.
+
+    Table-based layout with inline styles and literal colors so it renders the way the
+    meal_plan.html mockup looks (cream page, white rounded cards, accent day headers)
+    across email clients — Gmail strips `<style>` reliance, CSS variables, body
+    backgrounds, and flex `gap`.
+    """
     recipes = plan["recipes"]
     sides = plan.get("sides") or [None] * len(recipes)
+    veg_line = ", ".join(week_veggies) if week_veggies else "your share"
+
     P = ['<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">',
          '<meta name="viewport" content="width=device-width, initial-scale=1">',
-         f"<title>{_esc(week_label)}</title><style>{_CSS}</style></head><body><div class=\"wrap\">"]
-    P.append(f"<h1>{_esc(week_label)}</h1>")
-    veg_line = ", ".join(week_veggies) if week_veggies else "your share"
-    P.append(f'<p class="sub">{len(recipes)} dinners from your collection · using this week\'s '
-             f"CSA veggies: {_esc(veg_line)}</p>")
+         f"<title>{_esc(week_label)}</title><style>{_MOBILE_CSS}</style></head>",
+         f'<body style="margin:0;padding:0;background:{_PAGE_BG};line-height:1.5;'
+         'font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;'
+         f'color:{_INK};">',
+         # Outer wrapper carries the page background (clients strip <body> backgrounds).
+         f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
+         f'bgcolor="{_PAGE_BG}" style="background:{_PAGE_BG};"><tr>'
+         '<td align="center" style="padding:28px 12px 56px;">',
+         '<table role="presentation" width="820" cellpadding="0" cellspacing="0" border="0" '
+         'style="width:100%;max-width:820px;">',
+         f'<tr><td style="padding:0 4px 22px;">'
+         f'<h1 style="margin:0 0 4px;font-size:28px;letter-spacing:-.4px;color:{_INK};">{_esc(week_label)}</h1>'
+         f'<p style="margin:0;color:{_MUTED};font-size:15px;">{len(recipes)} dinners from your '
+         f"collection · using this week's CSA veggies: {_esc(veg_line)}</p></td></tr>"]
 
     for i, r in enumerate(recipes):
         day = _DAYS[i] if i < len(_DAYS) else f"Night {i + 1}"
         im, url, pin = _img_of(r), r.get("recipe_url"), r.get("pin_url")
-        P.append('<section class="day"><h2>' + _esc(day) + '</h2><div class="card">')
+        P.append('<tr><td class="day" style="padding-bottom:22px;">'
+                 '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
+                 f'bgcolor="#ffffff" style="background:#ffffff;border:1px solid {_LINE};border-radius:14px;'
+                 'overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.04);">'
+                 f'<tr><td style="background:{_ACCENT};color:#ffffff;padding:12px 18px;font-size:14px;'
+                 f'font-weight:600;text-transform:uppercase;letter-spacing:1.5px;">{_esc(day)}</td></tr>'
+                 '<tr><td style="padding:18px;">'
+                 '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>')
         if im:
-            P.append('<img src="' + _esc(im) + '" alt="' + _esc(r.get("title")) + '">')
+            photo = (f'<img class="photo" src="{_esc(im)}" width="210" height="150" '
+                     f'alt="{_esc(r.get("title"))}" style="display:block;width:210px;height:150px;'
+                     'object-fit:cover;border-radius:10px;background:#eee;">')
         else:
-            P.append('<div class="noimg">no photo</div>')
-        P.append('<div class="meta"><h3>' + _esc(r.get("title")) + '</h3>'
-                 '<p class="tag">' + _esc(_tag_of(r)) + '</p><div class="links">')
+            photo = ('<div class="photo" style="width:210px;height:150px;border-radius:10px;'
+                     'background:#efe9df;color:#b8ad9c;font-size:13px;text-align:center;'
+                     'line-height:150px;">no photo</div>')
+        P.append(f'<td class="ph" valign="top" width="210" style="width:210px;padding-right:18px;'
+                 f'vertical-align:top;">{photo}</td>')
+        P.append('<td class="mt" valign="top" style="vertical-align:top;">'
+                 f'<h3 style="margin:0 0 4px;font-size:20px;color:{_INK};">{_esc(r.get("title"))}</h3>'
+                 f'<p style="margin:0 0 10px;color:{_MUTED};font-size:13px;">{_esc(_tag_of(r))}</p>')
+        links = []
         if url:
-            P.append('<a href="' + _esc(url) + '" target="_blank">Recipe &rarr;</a>')
+            links.append(f'<a href="{_esc(url)}" target="_blank" style="{_LINK}">Recipe &rarr;</a>')
         if pin:
-            P.append('<a href="' + _esc(pin) + '" target="_blank">Pinterest pin &rarr;</a>')
-        P.append("</div>")
+            links.append(f'<a href="{_esc(pin)}" target="_blank" style="{_LINK}">Pinterest pin &rarr;</a>')
+        if links:
+            P.append('<p style="margin:0;font-size:14px;">' + " &nbsp;&nbsp; ".join(links) + "</p>")
+        P.append(_side_block(sides[i] if i < len(sides) else None, week_veggies))
         ings = [re.sub(r"\s+", " ", x).strip() for x in r.get("ingredients", []) if x.strip()]
         if ings:
-            P.append("<details><summary>Ingredients (" + str(len(ings)) + ")</summary><ul class=\"ings\">")
-            P.extend("<li>" + _esc(x) + "</li>" for x in ings)
+            P.append(f'<details style="margin-top:10px;"><summary style="cursor:pointer;color:{_MUTED};'
+                     f'font-size:13px;">Ingredients ({len(ings)})</summary>'
+                     '<ul style="margin:8px 0 0;padding-left:18px;font-size:13.5px;color:#46413a;">')
+            P.extend(f'<li style="margin:2px 0;">{_esc(x)}</li>' for x in ings)
             P.append("</ul></details>")
-        P.append(_side_block(sides[i] if i < len(sides) else None, week_veggies))
-        P.append("</div></div></section>")
+        P.append("</td></tr></table></td></tr></table></td></tr>")
 
     # Grocery list spans the mains and the suggested sides.
-    grocery_recipes = recipes + [s for s in sides if s]
-    buckets = build_grocery(grocery_recipes, week_veggies)
-    P.append('<section class="grocery"><h2>Grocery List</h2>')
-    P.append('<p class="note">Combined from all ' + str(len(recipes)) + " dinners plus suggested sides, "
-             "with this week's CSA veggies removed. Quantities are per recipe (not merged), so "
-             "double-check amounts where an item appears in more than one meal.</p>")
+    buckets = build_grocery(recipes + [s for s in sides if s], week_veggies)
+    P.append('<tr><td class="grocery">'
+             '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
+             f'bgcolor="#ffffff" style="background:#ffffff;border:1px solid {_LINE};border-radius:14px;'
+             'box-shadow:0 1px 3px rgba(0,0,0,.04);"><tr><td style="padding:22px 24px;">'
+             f'<h2 style="margin:0 0 4px;font-size:23px;color:{_INK};">Grocery List</h2>'
+             f'<p style="margin:0 0 16px;color:{_MUTED};font-size:13px;">Combined from all {len(recipes)} '
+             "dinners plus suggested sides, with this week's CSA veggies removed. Quantities are per "
+             "recipe (not merged), so double-check amounts where an item appears in more than one meal.</p>")
     for key, label in [("protein", "Proteins &amp; Seafood"), ("produce", "Produce"),
                        ("dairy", "Dairy &amp; Refrigerated"), ("other", "Pasta, Bread &amp; Other")]:
-        if not buckets[key]:
-            continue
-        P.append('<div class="gcat"><h3>' + label + "</h3><ul>")
-        P.extend("<li>" + _esc(x) + "</li>" for x in buckets[key])
-        P.append("</ul></div>")
+        if buckets[key]:
+            P.append(_grocery_category(label, buckets[key]))
     if buckets["pantry"]:
-        P.append('<div class="gcat pantry"><h3>Pantry Staples (you may already have these)</h3><ul>')
-        P.extend("<li>" + _esc(x) + "</li>" for x in buckets["pantry"])
-        P.append("</ul></div>")
-    P.append("</section></div></body></html>")
+        P.append(_grocery_category("Pantry Staples (you may already have these)",
+                                   buckets["pantry"], pantry=True))
+    P.append("</td></tr></table></td></tr>")
+    P.append("</table></td></tr></table></body></html>")
     return "\n".join(P)
