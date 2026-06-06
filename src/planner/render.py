@@ -144,6 +144,9 @@ _CSS = """
  summary{cursor:pointer;color:var(--muted);font-size:13px;}
  .ings{margin:8px 0 0;padding-left:18px;font-size:13.5px;color:#46413a;}
  .ings li{margin:2px 0;}
+ .side{margin:10px 0 0;padding:8px 12px;background:#f3eee5;border-radius:8px;font-size:13.5px;color:#5a5249;}
+ .side .lbl{color:var(--accent);font-weight:600;text-transform:uppercase;letter-spacing:.5px;font-size:11.5px;}
+ .side a{color:var(--accent);text-decoration:none;border-bottom:1px solid rgba(156,91,52,.35);}
  .grocery{margin-top:42px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 24px;}
  .grocery h2{margin:0 0 4px;font-size:23px;}
  .grocery .note{color:var(--muted);font-size:13px;margin:0 0 18px;}
@@ -159,9 +162,22 @@ _CSS = """
 """
 
 
+def _side_block(side, week_veggies):
+    """Render the 'suggested side' accompaniment for a night, or '' if none."""
+    if not side:
+        return ""
+    uses = [v for v in side.get("veggies", []) if v in set(week_veggies)]
+    uses_txt = (" — uses your " + " &amp; ".join(_esc(v) for v in uses)) if uses else ""
+    url = side.get("recipe_url")
+    title = ('<a href="' + _esc(url) + '" target="_blank">' + _esc(side.get("title")) + " &rarr;</a>"
+             ) if url else _esc(side.get("title"))
+    return ('<div class="side"><span class="lbl">Suggested side</span><br>' + title + uses_txt + "</div>")
+
+
 def render_html(plan, week_veggies, week_label="This Week's Dinners"):
     """Build the full HTML email from a planner.build_plan() result."""
     recipes = plan["recipes"]
+    sides = plan.get("sides") or [None] * len(recipes)
     P = ['<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">',
          '<meta name="viewport" content="width=device-width, initial-scale=1">',
          f"<title>{_esc(week_label)}</title><style>{_CSS}</style></head><body><div class=\"wrap\">"]
@@ -190,13 +206,16 @@ def render_html(plan, week_veggies, week_label="This Week's Dinners"):
             P.append("<details><summary>Ingredients (" + str(len(ings)) + ")</summary><ul class=\"ings\">")
             P.extend("<li>" + _esc(x) + "</li>" for x in ings)
             P.append("</ul></details>")
+        P.append(_side_block(sides[i] if i < len(sides) else None, week_veggies))
         P.append("</div></div></section>")
 
-    buckets = build_grocery(recipes, week_veggies)
+    # Grocery list spans the mains and the suggested sides.
+    grocery_recipes = recipes + [s for s in sides if s]
+    buckets = build_grocery(grocery_recipes, week_veggies)
     P.append('<section class="grocery"><h2>Grocery List</h2>')
-    P.append('<p class="note">Combined from all ' + str(len(recipes)) + " dinners, with this week's "
-             "CSA veggies removed. Quantities are per recipe (not merged), so double-check amounts "
-             "where an item appears in more than one meal.</p>")
+    P.append('<p class="note">Combined from all ' + str(len(recipes)) + " dinners plus suggested sides, "
+             "with this week's CSA veggies removed. Quantities are per recipe (not merged), so "
+             "double-check amounts where an item appears in more than one meal.</p>")
     for key, label in [("protein", "Proteins &amp; Seafood"), ("produce", "Produce"),
                        ("dairy", "Dairy &amp; Refrigerated"), ("other", "Pasta, Bread &amp; Other")]:
         if not buckets[key]:

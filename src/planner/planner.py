@@ -13,6 +13,10 @@ from .recipe_tagging import MEATS
 
 MEAT_CAP = 2  # at most this many of each meat protein per week
 
+# Aromatics are in nearly every recipe and aren't a "feature" side (no one plates a
+# garlic side dish), so we don't suggest accompaniments for them.
+AROMATICS = {"garlic", "onion", "shallot", "scallion"}
+
 
 def recipe_id(rec):
     """Stable id for a recipe: the normalized recipe_url, falling back to title."""
@@ -86,6 +90,51 @@ def _variety_key(rec, sel):
     return (unused_protein, adds_pasta, len(rec.get("veggies", [])), recipe_id(rec))
 
 
+def _suggest_sides(week_veggies, corpus, recent_ids, mains):
+    """Pair a veggie side dish with a night (ARCHITECTURE §4.2): for each CSA veggie,
+    suggest a `side` recipe that uses it — e.g. CSA carrots -> glazed carrots alongside a
+    protein main. Returns (side_by_night, side_ids) where side_by_night is aligned to
+    `mains` (a side recipe or None per night).
+
+    Heuristics: prefer veggies no main already uses (use up the share first); prefer fresh
+    sides over recently-used; pair to a meat-protein night whose main doesn't already carry
+    that veggie, so each suggestion adds variety rather than doubling up.
+    """
+    week = set(week_veggies)
+    sides = [r for r in corpus if r.get("dish_type") == "side" and set(r.get("veggies", [])) & week]
+    side_by_night = [None] * len(mains)
+    if not sides or not mains:
+        return side_by_night, []
+
+    main_veg = set().union(*[set(m.get("veggies", [])) for m in mains])
+    # Feature veggies only (skip aromatics). Veggies the mains miss come first; nights
+    # with a meat main come first.
+    targets = week - AROMATICS
+    veg_order = sorted(targets, key=lambda v: (v in main_veg, v))
+    night_order = sorted(range(len(mains)),
+                         key=lambda i: (mains[i].get("protein") not in MEATS, i))
+
+    used = set()
+    for veg in veg_order:
+        cands = [s for s in sides if veg in s.get("veggies", []) and recipe_id(s) not in used]
+        if not cands:
+            continue
+        fresh = [s for s in cands if recipe_id(s) not in recent_ids]
+        # Any side that uses this veggie qualifies (it needn't be the star); among them
+        # prefer one that uses the most of this week's CSA veggies, to use up the share.
+        side = max(fresh or cands, key=lambda s: (len(set(s.get("veggies", [])) & week), recipe_id(s)))
+        # Prefer a free night whose main lacks this veggie; else any free night.
+        target = next((i for i in night_order if side_by_night[i] is None
+                       and veg not in set(mains[i].get("veggies", []))), None)
+        if target is None:
+            target = next((i for i in night_order if side_by_night[i] is None), None)
+        if target is None:
+            break  # every night already has a suggested side
+        side_by_night[target] = side
+        used.add(recipe_id(side))
+    return side_by_night, [recipe_id(s) for s in side_by_night if s]
+
+
 def build_plan(week_veggies, corpus, recent_ids, nights):
     """Build the plan. Returns a dict (see module docstring / ARCHITECTURE §4).
 
@@ -124,13 +173,21 @@ def build_plan(week_veggies, corpus, recent_ids, nights):
     if len(sel.chosen) < nights:  # corpus exhausted of fresh mains; allow recent for variety
         fill_from([r for r in mains if recipe_id(r) not in sel.chosen_ids])
 
+    # 4. Suggest a veggie side dish per night (protein main + veg side).
+    sides, side_ids = _suggest_sides(week_veggies, corpus, recent_ids, sel.chosen)
+    side_veg = set().union(*[set(s.get("veggies", [])) & sel.week for s in sides if s]) if any(sides) else set()
+    covered = sel.covered | side_veg  # a veggie used by a suggested side counts as used
+
     return {
         "recipes": sel.chosen,
         "recipe_ids": [recipe_id(r) for r in sel.chosen],
         "proteins": [r.get("protein", "vegetarian") for r in sel.chosen],
+        "sides": sides,
+        "side_ids": side_ids,
         "veggies_week": sorted(sel.week),
-        "veggies_covered": sorted(sel.covered),
-        "veggies_uncovered": sorted(sel.uncovered),
+        "veggies_covered": sorted(covered),
+        "veggies_uncovered": sorted(sel.week - covered),
+        "veggies_covered_by_main": sorted(sel.covered),
         "forced_repeats": forced,
         "nights_requested": nights,
         "nights_filled": len(sel.chosen),

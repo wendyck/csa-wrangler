@@ -55,6 +55,7 @@ def recent_recipe_ids(weeks):
     ids = set()
     for item in resp.get("Items", []):
         ids.update(item.get("recipe_ids", []))
+        ids.update(item.get("side_ids", []))   # sides rotate too, so they don't repeat
     return ids
 
 
@@ -63,6 +64,7 @@ def log_plan(plan, sk_date, week_label, ses_message_id, html_s3_key):
         "pk": "PLAN",
         "sk": sk_date,
         "recipe_ids": plan["recipe_ids"],
+        "side_ids": plan.get("side_ids", []),
         "proteins": plan["proteins"],
         "veggies_covered": plan["veggies_covered"],
         "week_label": week_label,

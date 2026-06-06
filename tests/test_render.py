@@ -40,6 +40,21 @@ def test_image_fallback_placeholder():
     assert "no photo" in out and "<img" not in out
 
 
+def test_suggested_side_rendered():
+    plan = {
+        "recipes": [{"title": "Roast Chicken", "recipe_url": "http://x", "ingredients": [],
+                     "veggies": [], "protein": "chicken", "is_pasta": False}],
+        "sides": [{"title": "Glazed Carrots", "recipe_url": "http://y",
+                   "ingredients": ["1 lb carrots", "2 tbsp butter"], "veggies": ["carrot"]}],
+    }
+    out = render.render_html(plan, week_veggies=["carrot"])
+    assert "Suggested side" in out
+    assert "Glazed Carrots" in out
+    assert "uses your carrot" in out
+    # side ingredient (non-CSA) flows into the grocery list; the CSA carrot is removed
+    assert "butter" in out.lower()
+
+
 def test_real_week_render_smoke(corpus):
     plan = planner.build_plan(["carrot", "tomato", "kale"], corpus, recent_ids=set(), nights=6)
     html = render.render_html(plan, ["carrot", "tomato", "kale"], week_label="CSA Week Test")

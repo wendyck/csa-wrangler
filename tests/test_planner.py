@@ -69,6 +69,43 @@ def test_fill_to_n_nights_with_variety():
     assert len(set(plan["proteins"])) >= 2
 
 
+def test_side_suggested_for_csa_veggie():
+    corpus = [mk("chicken-main", ["tomato"], protein="chicken"),
+              mk("glazed-carrots", ["carrot"], dish_type="side")]
+    plan = planner.build_plan(["carrot", "tomato"], corpus, set(), nights=1)
+    assert plan["recipes"][0]["title"] == "chicken-main"          # main is protein-driven
+    assert plan["sides"][0]["title"] == "glazed-carrots"          # side paired to the night
+    assert plan["side_ids"] == [planner.recipe_id(corpus[1])]
+
+
+def test_side_covers_veggie_with_no_main():
+    # beet-style: only a side uses beet -> it still counts as covered (used up)
+    corpus = [mk("any-main", ["tomato"], protein="beef"),
+              mk("roasted-beets", ["beet"], dish_type="side")]
+    plan = planner.build_plan(["beet", "tomato"], corpus, set(), nights=1)
+    assert "beet" in plan["veggies_covered"]
+    assert plan["veggies_uncovered"] == []
+    assert "beet" not in plan["veggies_covered_by_main"]          # via the side, not a main
+
+
+def test_side_pairs_to_meat_night_lacking_the_veggie():
+    corpus = [mk("veg-carrot-main", ["carrot"], protein="vegetarian"),
+              mk("beef-main", ["tomato"], protein="beef"),
+              mk("carrot-side", ["carrot"], dish_type="side")]
+    plan = planner.build_plan(["carrot", "tomato"], corpus, set(), nights=2)
+    night = plan["recipes"].index(next(r for r in plan["recipes"] if r["title"] == "beef-main"))
+    assert plan["sides"][night] and plan["sides"][night]["title"] == "carrot-side"
+
+
+def test_recent_sides_avoided():
+    corpus = [mk("main", ["tomato"], protein="chicken"),
+              mk("side-old", ["carrot"], dish_type="side"),
+              mk("side-new", ["carrot"], dish_type="side")]
+    recent = {planner.recipe_id(corpus[1])}
+    plan = planner.build_plan(["carrot", "tomato"], corpus, recent, nights=1)
+    assert plan["side_ids"] == [planner.recipe_id(corpus[2])]     # the fresh side
+
+
 def test_deterministic():
     corpus = [mk(f"r{i}", ["carrot", "tomato"]) for i in range(6)]
     a = planner.build_plan(["carrot", "tomato"], corpus, set(), 4)

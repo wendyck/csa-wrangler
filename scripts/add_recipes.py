@@ -90,7 +90,7 @@ def main():
                    "pinterest_image": None, "recipe_image": e["image"],
                    "description": "", "ingredients": e["ingredients"],
                    "source": "manual", "status": "enriched"}
-            rec["veggies"], rec["protein"], rec["is_pasta"] = rt.tag(rec)
+            rec.update(rt.tag(rec))   # veggies, protein, is_pasta, dish_type
             corpus.append(rec); have.add(norm(url)); added += 1
             print(f"[{i}/{len(urls)}] OK [{rec['protein']}] {', '.join(rec['veggies']) or 'no veg'} | {rec['title'][:40]}")
         except Exception as ex:
