@@ -1,0 +1,41 @@
+# Dependabot version updates. Opens PRs to bump dependencies on a weekly schedule.
+# (Security-only update PRs and vulnerability alerts are toggled separately in the repo
+#  Settings → Code security; this file drives the routine version-update PRs.)
+version: 2
+updates:
+  # Scraper tooling — scripts/add_recipes.py, scrape_*.py
+  - package-ecosystem: "pip"
+    directory: "/scripts"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+    commit-message:
+      prefix: "deps(scripts)"
+    groups:
+      scripts:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # Test / dev tooling — requirements-dev.txt
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+    commit-message:
+      prefix: "deps(dev)"
+    groups:
+      dev:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # GitHub Actions workflows — no-op until a workflow is added under .github/workflows
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels: ["dependencies"]
+    commit-message:
+      prefix: "deps(actions)"

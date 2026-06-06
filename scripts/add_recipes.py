@@ -3,7 +3,7 @@
 Add hand-picked recipe URLs to the corpus. Scrapes ingredients/title/image,
 tags veggies+protein, merges into recipes_tagged.json (dedup by URL).
 
-  pip install recipe-scrapers requests
+  pip install -r scripts/requirements.txt
   python3 add_recipes.py --urls urls.txt --corpus recipes_tagged.json
 
 urls.txt: one recipe URL per line; blank lines and #comments ignored.

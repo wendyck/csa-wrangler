@@ -1,0 +1,5 @@
+# Dependencies for the local corpus tools (add_recipes.py, scrape_*.py).
+# Not used by the Lambda (the planner is pure-stdlib + boto3 from the runtime).
+#   pip install -r scripts/requirements.txt
+recipe-scrapers==15.11.0
+requests==2.34.2

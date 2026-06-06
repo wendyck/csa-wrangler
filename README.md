@@ -170,8 +170,8 @@ aws s3 cp recipes_tagged.json s3://<bucket>/corpus/recipes_tagged.json
 
 `add_recipes.py` scrapes title/ingredients/image (via `recipe-scrapers`, with JSON-LD and
 microdata fallbacks), tags `veggies`/`protein`/`is_pasta`/`dish_type`, and merges into the
-corpus (deduped by URL; failures go to `add_failures.csv`). Requires `pip install
-recipe-scrapers requests`. JavaScript-rendered recipe pages can't be scraped statically —
+corpus (deduped by URL; failures go to `add_failures.csv`). Requires `pip install -r
+scripts/requirements.txt`. JavaScript-rendered recipe pages can't be scraped statically —
 those need a headless browser.
 
 `dish_type` is the fuzziest tag — roasted/glazed/sautéed dishes tag as **sides**, which is
@@ -194,7 +194,7 @@ which makes local runs easy):
 ## Local development
 
 ```bash
-python3.13 -m venv .venv && .venv/bin/pip install pytest
+python3.13 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python -m pytest            # corpus-backed tests skip if the corpus is absent
 
 # point the corpus-backed tests at a local corpus
