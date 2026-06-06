@@ -17,6 +17,16 @@ def test_pepper_guard_spice_still_pantry():
     assert render.categorize("salt & pepper (to taste)") == "pantry"
 
 
+def test_prep_words_dont_misfile_aromatics_as_protein():
+    # "minced"/"ground" must not push produce into the protein bucket
+    assert render.categorize("2-3 teaspoons garlic, (minced)") == "produce"
+    assert render.categorize("1 large red onion, minced") == "produce"
+    assert render.categorize("1 1/2 tablespoons minced peeled fresh ginger") == "produce"
+    # real proteins still classify correctly
+    assert render.categorize("1/2 pound ground spicy Italian chicken sausage") == "protein"
+    assert render.categorize("1 lb ground beef") == "protein"
+
+
 def test_csa_veggies_subtracted_from_grocery():
     r = {"title": "Carrot Soup", "ingredients": ["1 lb carrots, peeled", "2 cups water", "1 onion"],
          "veggies": ["carrot", "onion"]}
@@ -24,6 +34,21 @@ def test_csa_veggies_subtracted_from_grocery():
     flat = sum(buckets.values(), [])
     assert not any("carrot" in x.lower() for x in flat)   # CSA veggie removed
     assert any("onion" in x.lower() for x in flat)         # non-CSA veggie kept
+
+
+def test_grocery_clusters_like_ingredients():
+    # two basil lines and two garlic lines arrive from different recipes, interleaved
+    recipes = [
+        {"title": "A", "veggies": [], "ingredients": ["A few basil leaves", "2-3 teaspoons garlic, (minced)"]},
+        {"title": "B", "veggies": [], "ingredients": ["1 cup basil leaves (, loosely packed)",
+                                                       "1 1/2 tsp garlic (, finely minced)"]},
+    ]
+    produce = render.build_grocery(recipes, week_veggies=[])["produce"]
+    # same-ingredient lines must be adjacent
+    basil = [i for i, x in enumerate(produce) if "basil" in x.lower()]
+    garlic = [i for i, x in enumerate(produce) if "garlic" in x.lower()]
+    assert basil == [basil[0], basil[0] + 1], produce
+    assert garlic == [garlic[0], garlic[0] + 1], produce
 
 
 def test_pinterest_link_omitted_without_pin_url():

@@ -30,8 +30,11 @@ PANTRY = [
     "sriracha", "chili garlic", "gochujang", "cooking spray", "vegetable stock",
     "chicken stock", "beef stock", "stock cube",
 ]
-PROTEIN = ["chicken", "beef", "steak", "sirloin", "pork", "sausage", "bacon", "salmon", "fish",
-           "shrimp", "prawn", "tofu", "lamb", "turkey", "ground", "thigh", "breast", "fillet", "mince"]
+# Real protein names only — NOT prep words like "ground"/"minced"/"thigh", which would
+# misfile "minced garlic" or "ground cumin" as a protein. "ground beef" still matches "beef".
+PROTEIN = ["chicken", "beef", "steak", "sirloin", "pork", "sausage", "bacon", "prosciutto",
+           "pancetta", "ham", "salmon", "tuna", "cod", "halibut", "fish", "shrimp", "prawn",
+           "scallop", "tofu", "tempeh", "lamb", "turkey"]
 DAIRY = ["butter", "egg", "milk", "cream", "cheese", "yogurt", "yoghurt", "parmesan", "feta",
          "mozzarella", "ricotta", "sour cream", "crème", "half-and-half", "coconut milk",
          "coconut cream", "fontina"]
@@ -39,8 +42,8 @@ PRODUCE = ["onion", "garlic", "ginger", "carrot", "potato", "tomato", "pepper", 
            "mushroom", "spinach", "cucumber", "scallion", "green onion", "shallot", "lemon",
            "lime", "cilantro", "parsley", "basil", "broccoli", "cauliflower", "kale", "chard",
            "cabbage", "celery", "fennel", "leek", "pea", "bean", "eggplant", "squash", "herb",
-           "lettuce", "dill", "mint", "jalap", "corn", "beet", "apple", "avocado", "radish",
-           "arugula", "asparagus", "sprout"]
+           "lettuce", "dill", "mint", "jalap", "chile", "chili pepper", "ginger", "corn",
+           "beet", "apple", "avocado", "radish", "arugula", "asparagus", "sprout"]
 
 # A "pepper" mention is a pantry spice only as ground/peppercorn/flakes; bell & sweet
 # peppers (and most fresh chiles) are produce.  This is the §5/§7 pepper-guard fix.
@@ -85,9 +88,39 @@ def _is_csa_veggie(line, week_veggies):
     return any(canon in week and _VEG_C[canon].search(line.lower()) for canon in _VEG_C)
 
 
+# Terms used to cluster like ingredients within a category (so the two "basil leaves"
+# lines, or the garlic lines, land next to each other). Longest match wins, so e.g.
+# "bell pepper" beats "pepper" and "parmesan" beats "cheese". Quantities are NOT merged —
+# this only sorts lines so identical ingredients are adjacent for easy manual summing.
+_GROUP_TERMS = sorted(
+    set(_VEG_C) | set(DAIRY) | set(PRODUCE) | set(STARCH) | {
+        "chicken", "beef", "pork", "sausage", "bacon", "prosciutto", "pancetta", "ham",
+        "salmon", "tuna", "cod", "halibut", "shrimp", "prawn", "tofu", "lamb", "turkey",
+        "olive oil", "sesame oil", "vegetable oil", "soy sauce", "fish sauce", "vinegar",
+    },
+    key=len, reverse=True)
+
+_QTY_RE = re.compile(
+    r"\b(?:cups?|tbsps?|tablespoons?|tsps?|teaspoons?|oz|ounces?|lbs?|pounds?|g|grams?|kg|"
+    r"ml|l|cloves?|slices?|cans?|pinch|stems?|sprigs?|handful|bunch|large|small|medium|"
+    r"few|about|of|fresh|to|taste)\b|[\d/.¼-¾]+")
+
+
+def _ingredient_key(line):
+    """A clustering key for a grocery line: the longest known ingredient term it contains,
+    else a quantity-stripped version of the text so similar lines still group."""
+    low = re.sub(r"\([^)]*\)", " ", line.lower())
+    for term in _GROUP_TERMS:
+        if re.search(r"\b" + re.escape(term), low):
+            return term
+    cleaned = _QTY_RE.sub(" ", low.split(",")[0])
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
 def build_grocery(recipes, week_veggies):
     """Union of ingredients across chosen recipes, minus this week's CSA veggies,
-    categorized.  Quantities are per-recipe (no merging) in v1."""
+    categorized. Quantities are per-recipe (not merged); within each category, lines for
+    the same ingredient are clustered together so you can sum them up yourself."""
     buckets = {"protein": [], "produce": [], "dairy": [], "pantry": [], "other": []}
     seen = set()
     for r in recipes:
@@ -100,6 +133,8 @@ def build_grocery(recipes, week_veggies):
             if _is_csa_veggie(ing, week_veggies):     # you already have these from the CSA
                 continue
             buckets[categorize(ing)].append(ing)
+    for items in buckets.values():
+        items.sort(key=lambda ln: (_ingredient_key(ln), ln.lower()))
     return buckets
 
 
