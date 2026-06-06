@@ -50,3 +50,11 @@ def test_extract_share_line_strips_footnote_period():
 
 def test_missing_share_line_returns_none():
     assert parse.extract_share_line("no share info here") is None
+
+
+def test_parse_email_raises_noshareline_for_non_csa():
+    import pytest
+    raw = b"Subject: test\r\nFrom: a@b.com\r\nContent-Type: text/plain\r\n\r\njust a test email\r\n"
+    with pytest.raises(parse.NoShareLine):
+        parse.parse_email(raw)
+    assert issubclass(parse.NoShareLine, ValueError)  # stays catchable as ValueError

@@ -73,6 +73,19 @@ def lambda_handler(event, context):
 
     try:
         return _process(message_id, subject, date_header)
+    except parse.NoShareLine as exc:
+        # Expected: a non-CSA email (or a format change). Send a heads-up but treat as
+        # handled — returning normally avoids SES retries, the DLQ, and the error alarm.
+        log.info("ignored unparseable email %s: %s", message_id, exc)
+        try:
+            stores.send_diagnostic(
+                "[CSA planner] Ignored an email I couldn't read",
+                f"No 'Share contents:' line found, so no plan was built.\n\n"
+                f"messageId: {message_id}\nsubject: {subject}",
+            )
+        except Exception:
+            log.exception("diagnostic email failed")
+        return {"status": "unparseable", "messageId": message_id}
     except Exception as exc:                       # noqa: BLE001 - want the DLQ + alarm
         log.exception("planner failed for %s", message_id)
         try:

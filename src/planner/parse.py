@@ -23,6 +23,11 @@ SKIP_SUBSTRINGS = (
     "basil", "parsley", "cilantro", "dill", "mint", "tatsoi",
 )
 
+class NoShareLine(ValueError):
+    """Email has no 'Share contents:' line — i.e. it isn't a CSA share email (or the
+    CSA changed its format). Handled as a diagnostic, not an unexpected error."""
+
+
 _SHARE_RE = re.compile(r"share\s+contents?\s*:\s*(.*?)(?:\.\s|\.\*|\.$|\n\n)", re.I | re.S)
 _PAREN_RE = re.compile(r"\([^)]*\)")
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -96,7 +101,7 @@ def parse_email(raw_bytes):
     text = _body_text(msg)
     share_line = extract_share_line(text)
     if not share_line:
-        raise ValueError("no 'Share contents:' line found in email body")
+        raise NoShareLine("no 'Share contents:' line found in email body")
 
     subject = (msg.get("subject") or "").strip()
     date = msg.get("date")
