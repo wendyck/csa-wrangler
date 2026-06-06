@@ -227,3 +227,8 @@ recipes_tagged.json
 paywalled_worklist.csv
 needs_manual*.csv
 add_failures.csv
+
+# Build artifacts, tooling state, macOS cruft
+.aws-sam/
+.gstack/
+.DS_Store

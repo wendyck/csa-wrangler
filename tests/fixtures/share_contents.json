@@ -1,0 +1,300 @@
+{
+  "week1": {
+    "share_line": "lettuce salad mix, microgreen mix, garlic scapes, sugar snap peas, and sweet salad turnips",
+    "raw_items": [
+      "lettuce salad mix",
+      "microgreen mix",
+      "garlic scapes",
+      "sugar snap peas",
+      "sweet salad turnips"
+    ],
+    "veggies": [
+      "garlic",
+      "pea",
+      "turnip"
+    ]
+  },
+  "week2": {
+    "share_line": "lettuce salad mix, spicy salad mix, baby bok choi, radishes, and carrots",
+    "raw_items": [
+      "lettuce salad mix",
+      "spicy salad mix",
+      "baby bok choi",
+      "radishes",
+      "carrots"
+    ],
+    "veggies": [
+      "bok choy",
+      "carrot",
+      "radish"
+    ]
+  },
+  "week3": {
+    "share_line": "lettuce salad mix, microgreen mix, lacinato kale, beets, and fresh garlic",
+    "raw_items": [
+      "lettuce salad mix",
+      "microgreen mix",
+      "lacinato kale",
+      "beets",
+      "fresh garlic"
+    ],
+    "veggies": [
+      "beet",
+      "garlic",
+      "kale"
+    ]
+  },
+  "week4": {
+    "share_line": "gem lettuces (mini romaines), baby arugula, scallions, carrots, and slicing cucumbers",
+    "raw_items": [
+      "gem lettuces (mini romaines)",
+      "baby arugula",
+      "scallions",
+      "carrots",
+      "slicing cucumbers"
+    ],
+    "veggies": [
+      "carrot",
+      "cucumber",
+      "scallion"
+    ]
+  },
+  "week5": {
+    "share_line": "lettuce salad mix, microgreen mix, sweet salad turnips, zucchini, and fresh yellow onions",
+    "raw_items": [
+      "lettuce salad mix",
+      "microgreen mix",
+      "sweet salad turnips",
+      "zucchini",
+      "fresh yellow onions"
+    ],
+    "veggies": [
+      "onion",
+      "turnip",
+      "zucchini"
+    ]
+  },
+  "week6": {
+    "share_line": "lettuce salad mix, spicy salad mix, carrots, radishes, and cherry tomatoes",
+    "raw_items": [
+      "lettuce salad mix",
+      "spicy salad mix",
+      "carrots",
+      "radishes",
+      "cherry tomatoes"
+    ],
+    "veggies": [
+      "carrot",
+      "radish",
+      "tomato"
+    ]
+  },
+  "week7": {
+    "share_line": "lettuce salad mix, microgreen mix, fresh red onions, mixed cucumbers, and lacinato kale",
+    "raw_items": [
+      "lettuce salad mix",
+      "microgreen mix",
+      "fresh red onions",
+      "mixed cucumbers",
+      "lacinato kale"
+    ],
+    "veggies": [
+      "cucumber",
+      "kale",
+      "onion"
+    ]
+  },
+  "week8": {
+    "share_line": "lettuce salad mix, spicy salad mix, carrots, cherry tomatoes, and flat leaf parsley",
+    "raw_items": [
+      "lettuce salad mix",
+      "spicy salad mix",
+      "carrots",
+      "cherry tomatoes",
+      "flat leaf parsley"
+    ],
+    "veggies": [
+      "carrot",
+      "tomato"
+    ]
+  },
+  "week9": {
+    "share_line": "lettuce salad mix, microgreen mix, zucchini, sweet salad turnips, and heirloom tomatoes",
+    "raw_items": [
+      "lettuce salad mix",
+      "microgreen mix",
+      "zucchini",
+      "sweet salad turnips",
+      "heirloom tomatoes"
+    ],
+    "veggies": [
+      "tomato",
+      "turnip",
+      "zucchini"
+    ]
+  },
+  "week10": {
+    "share_line": "lettuce salad mix, spicy salad mix, carrots, rainbow chard, and cherry tomatoes",
+    "raw_items": [
+      "lettuce salad mix",
+      "spicy salad mix",
+      "carrots",
+      "rainbow chard",
+      "cherry tomatoes"
+    ],
+    "veggies": [
+      "carrot",
+      "chard",
+      "tomato"
+    ]
+  },
+  "week11": {
+    "share_line": "microgreen mix, gem lettuces, basil, mixed cucumbers, and heirloom tomatoes",
+    "raw_items": [
+      "microgreen mix",
+      "gem lettuces",
+      "basil",
+      "mixed cucumbers",
+      "heirloom tomatoes"
+    ],
+    "veggies": [
+      "cucumber",
+      "tomato"
+    ]
+  },
+  "week12": {
+    "share_line": "lettuce salad mix, baby arugula, carrots, baby bok choi, and Italian parsley",
+    "raw_items": [
+      "lettuce salad mix",
+      "baby arugula",
+      "carrots",
+      "baby bok choi",
+      "Italian parsley"
+    ],
+    "veggies": [
+      "bok choy",
+      "carrot"
+    ]
+  },
+  "week13": {
+    "share_line": "lettuce salad mix, microgreen mix, carrots, collard greens, and cherry tomatoes",
+    "raw_items": [
+      "lettuce salad mix",
+      "microgreen mix",
+      "carrots",
+      "collard greens",
+      "cherry tomatoes"
+    ],
+    "veggies": [
+      "carrot",
+      "collard",
+      "tomato"
+    ]
+  },
+  "week14": {
+    "share_line": "lettuce salad mix, spicy salad mix, lacinato kale, mixed cucumbers, and basil",
+    "raw_items": [
+      "lettuce salad mix",
+      "spicy salad mix",
+      "lacinato kale",
+      "mixed cucumbers",
+      "basil"
+    ],
+    "veggies": [
+      "cucumber",
+      "kale"
+    ]
+  },
+  "week15": {
+    "share_line": "head lettuce, microgreen mix, sweet salad turnips, carrots, and heirloom OR cherry tomatoes",
+    "raw_items": [
+      "head lettuce",
+      "microgreen mix",
+      "sweet salad turnips",
+      "carrots",
+      "heirloom OR cherry tomatoes"
+    ],
+    "veggies": [
+      "carrot",
+      "tomato",
+      "turnip"
+    ]
+  },
+  "week16": {
+    "share_line": "lettuce salad mix, radishes, carrots, green cabbage, and collard greens",
+    "raw_items": [
+      "lettuce salad mix",
+      "radishes",
+      "carrots",
+      "green cabbage",
+      "collard greens"
+    ],
+    "veggies": [
+      "cabbage",
+      "carrot",
+      "collard",
+      "radish"
+    ]
+  },
+  "week17": {
+    "share_line": "microgreen mix, radishes, lacinato kale, basil and heirloom tomatoes",
+    "raw_items": [
+      "microgreen mix",
+      "radishes",
+      "lacinato kale",
+      "basil",
+      "heirloom tomatoes"
+    ],
+    "veggies": [
+      "kale",
+      "radish",
+      "tomato"
+    ]
+  },
+  "week18": {
+    "share_line": "seasonal salad mix, carrots, sweet salad turnips, daikon radish, and tatsoi",
+    "raw_items": [
+      "seasonal salad mix",
+      "carrots",
+      "sweet salad turnips",
+      "daikon radish",
+      "tatsoi"
+    ],
+    "veggies": [
+      "carrot",
+      "radish",
+      "turnip"
+    ]
+  },
+  "week19": {
+    "share_line": "seasonal salad mix, microgreen mix, lacinato kale, garlic, and watermelon radishes",
+    "raw_items": [
+      "seasonal salad mix",
+      "microgreen mix",
+      "lacinato kale",
+      "garlic",
+      "watermelon radishes"
+    ],
+    "veggies": [
+      "garlic",
+      "kale",
+      "radish"
+    ]
+  },
+  "week20": {
+    "share_line": "seasonal salad mix, carrots, radishes, baby bok choi, and shallots",
+    "raw_items": [
+      "seasonal salad mix",
+      "carrots",
+      "radishes",
+      "baby bok choi",
+      "shallots"
+    ],
+    "veggies": [
+      "bok choy",
+      "carrot",
+      "radish",
+      "shallot"
+    ]
+  }
+}

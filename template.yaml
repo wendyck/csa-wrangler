@@ -1,0 +1,276 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  CSA meal planner — serverless pipeline. A forwarded CSA email arrives via SES, a Lambda
+  parses the week's veggies, builds a varied dinner plan from the recipe corpus, and emails
+  back a formatted plan + grocery list. (ARCHITECTURE.md)
+
+Parameters:
+  Domain:
+    Type: String
+    Default: csa.wendyk.org
+    Description: Subdomain verified in SES for receiving (its own MX, isolated from Workspace mail).
+  PlanAddress:
+    Type: String
+    Default: plan@csa.wendyk.org
+    Description: Inbound address the Gmail filter forwards CSA emails to.
+  FromEmail:
+    Type: String
+    Default: plan@csa.wendyk.org
+    Description: "Verified From: address for the outbound plan."
+  RecipientEmail:
+    Type: String
+    Default: claude@wendyk.org
+    Description: Where the finished plan and ops alerts go (must be SES-verified in sandbox).
+  NightsPerWeek:
+    Type: Number
+    Default: 6
+  NoRepeatWeeks:
+    Type: Number
+    Default: 3
+
+Globals:
+  Function:
+    Runtime: python3.13
+    MemorySize: 512
+    Timeout: 60
+    Architectures: [arm64]
+
+Resources:
+
+  # --- Storage ---------------------------------------------------------------
+  Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "csa-wrangler-${AWS::AccountId}-${AWS::Region}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-raw-emails
+            Status: Enabled
+            Prefix: raw-emails/
+            ExpirationInDays: 90
+
+  # Allow SES inbound to write raw MIME under raw-emails/.
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowSESInboundPut
+            Effect: Allow
+            Principal: { Service: ses.amazonaws.com }
+            Action: s3:PutObject
+            Resource: !Sub "arn:aws:s3:::${Bucket}/raw-emails/*"
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+  HistoryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: csa-wrangler-history
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: pk, AttributeType: S }
+        - { AttributeName: sk, AttributeType: S }
+      KeySchema:
+        - { AttributeName: pk, KeyType: HASH }
+        - { AttributeName: sk, KeyType: RANGE }
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # --- Config & secrets ------------------------------------------------------
+  ParamRecipient:
+    Type: AWS::SSM::Parameter
+    Properties: { Name: /csa-wrangler/RECIPIENT_EMAIL, Type: String, Value: !Ref RecipientEmail }
+  ParamFrom:
+    Type: AWS::SSM::Parameter
+    Properties: { Name: /csa-wrangler/FROM_EMAIL, Type: String, Value: !Ref FromEmail }
+  ParamNights:
+    Type: AWS::SSM::Parameter
+    Properties: { Name: /csa-wrangler/NIGHTS_PER_WEEK, Type: String, Value: !Ref NightsPerWeek }
+  ParamNoRepeat:
+    Type: AWS::SSM::Parameter
+    Properties: { Name: /csa-wrangler/NO_REPEAT_WEEKS, Type: String, Value: !Ref NoRepeatWeeks }
+  ParamCorpusKey:
+    Type: AWS::SSM::Parameter
+    Properties: { Name: /csa-wrangler/CORPUS_S3_KEY, Type: String, Value: corpus/recipes_tagged.json }
+
+  # Empty placeholder for a future LLM key / NYT cookies (ARCHITECTURE §8). Not used in v1.
+  Secret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: csa-wrangler/app
+      Description: Reserved for future sensitive config (v1 uses none).
+
+  # --- Reliability -----------------------------------------------------------
+  DLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: csa-wrangler-dlq
+      MessageRetentionPeriod: 1209600  # 14 days
+
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: csa-wrangler-alerts
+
+  AlertSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: !Ref RecipientEmail
+
+  # --- The planner Lambda ----------------------------------------------------
+  PlannerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: csa-wrangler-planner
+      CodeUri: src/
+      Handler: planner.app.lambda_handler
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt DLQ.Arn
+      Environment:
+        Variables:
+          BUCKET: !Ref Bucket
+          TABLE: !Ref HistoryTable
+          SECRET_ARN: !Ref Secret
+          SSM_PREFIX: /csa-wrangler
+          RAW_PREFIX: raw-emails/
+          ARCHIVE_PREFIX: plan-archive/
+      Policies:
+        - S3CrudPolicy: { BucketName: !Ref Bucket }
+        - DynamoDBCrudPolicy: { TableName: !Ref HistoryTable }
+        - Statement:
+            - Effect: Allow
+              Action: ses:SendEmail
+              # Least privilege: only this app's own identities (sending domain + recipient),
+              # and only as the plan From address. The recipient identity is required while
+              # in the SES sandbox, which authorizes SendEmail against verified recipients.
+              Resource:
+                - !Sub "arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/${Domain}"
+                - !Sub "arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/${RecipientEmail}"
+              Condition:
+                StringEquals:
+                  ses:FromAddress: !Ref FromEmail
+            - Effect: Allow
+              Action: [ssm:GetParameter, ssm:GetParametersByPath]
+              # GetParametersByPath authorizes against the path node itself, not just
+              # its children, so grant both the node and the wildcard under it.
+              Resource:
+                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/csa-wrangler"
+                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/csa-wrangler/*"
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref Secret
+
+  # Let SES invoke the planner (LambdaAction).
+  SESInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref PlannerFunction
+      Action: lambda:InvokeFunction
+      Principal: ses.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+
+  ErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: csa-wrangler-planner-errors
+      AlarmDescription: Planner Lambda raised an error (a bad email or bug).
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - { Name: FunctionName, Value: !Ref PlannerFunction }
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+
+  DLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: csa-wrangler-dlq-depth
+      AlarmDescription: A message landed in the planner DLQ.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - { Name: QueueName, Value: !GetAtt DLQ.QueueName }
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+
+  # --- SES email identity + inbound receipt ----------------------------------
+  EmailIdentity:
+    Type: AWS::SES::EmailIdentity
+    Properties:
+      EmailIdentity: !Ref Domain
+      DkimAttributes:
+        SigningEnabled: true
+
+  ReceiptRuleSet:
+    Type: AWS::SES::ReceiptRuleSet
+    Properties:
+      RuleSetName: csa-wrangler-ruleset
+
+  ReceiptRule:
+    Type: AWS::SES::ReceiptRule
+    DependsOn: [BucketPolicy, SESInvokePermission]
+    Properties:
+      RuleSetName: !Ref ReceiptRuleSet
+      Rule:
+        Name: plan-inbound
+        Enabled: true
+        ScanEnabled: true
+        Recipients: [!Ref PlanAddress]
+        Actions:
+          - S3Action:
+              BucketName: !Ref Bucket
+              ObjectKeyPrefix: raw-emails/
+          - LambdaAction:
+              FunctionArn: !GetAtt PlannerFunction.Arn
+              InvocationType: Event
+
+Outputs:
+  MXRecord:
+    Description: "Cloudflare MX for the subdomain (priority 10, DNS-only)."
+    Value: !Sub "${Domain}  MX 10  inbound-smtp.${AWS::Region}.amazonaws.com"
+  DkimCName1Name:
+    Value: !GetAtt EmailIdentity.DkimDNSTokenName1
+  DkimCName1Value:
+    Value: !GetAtt EmailIdentity.DkimDNSTokenValue1
+  DkimCName2Name:
+    Value: !GetAtt EmailIdentity.DkimDNSTokenName2
+  DkimCName2Value:
+    Value: !GetAtt EmailIdentity.DkimDNSTokenValue2
+  DkimCName3Name:
+    Value: !GetAtt EmailIdentity.DkimDNSTokenName3
+  DkimCName3Value:
+    Value: !GetAtt EmailIdentity.DkimDNSTokenValue3
+  BucketName:
+    Value: !Ref Bucket
+  CorpusUploadCommand:
+    Description: Post-deploy — upload the recipe corpus.
+    Value: !Sub "aws s3 cp recipes_tagged.json s3://${Bucket}/corpus/recipes_tagged.json"
+  ActivateRuleSetCommand:
+    Description: Post-deploy — SES rule sets can't be activated via CloudFormation.
+    Value: !Sub "aws ses set-active-receipt-rule-set --rule-set-name ${ReceiptRuleSet} --region ${AWS::Region}"
+  RuleSetName:
+    Value: !Ref ReceiptRuleSet

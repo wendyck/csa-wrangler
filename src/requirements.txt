@@ -1,0 +1,2 @@
+# Runtime deps: none — boto3 is provided by the Lambda Python runtime.
+# Pure-stdlib planner; recipe_tagging vocab is bundled in the package.
