@@ -106,6 +106,29 @@ def test_recent_sides_avoided():
     assert plan["side_ids"] == [planner.recipe_id(corpus[2])]     # the fresh side
 
 
+def test_avoids_duplicate_dishes_in_fillers():
+    # three near-identical dishes (same signature) but different proteins -> the protein
+    # cap won't stop them, the dish-conflict guard must.
+    corpus = [
+        mk("Instant Pot Black-Eyed Peas", ["tomato"], protein="pork"),
+        mk("Southern Black-Eyed Peas Recipe", ["tomato"], protein="turkey"),
+        mk("Black-Eyed Peas with Coconut Milk", ["tomato"], protein="vegetarian"),
+        mk("Short Rib Ragu", ["tomato"], protein="beef"),
+        mk("Lemon Chicken Piccata", ["tomato"], protein="chicken"),
+        mk("Salmon Teriyaki", ["tomato"], protein="fish"),
+    ]
+    plan = planner.build_plan(["tomato"], corpus, set(), nights=4)
+    bep = [t for t in (r["title"] for r in plan["recipes"]) if "Black-Eyed Peas" in t]
+    assert len(bep) == 1, plan["recipe_ids"]
+    assert plan["nights_filled"] == 4
+
+
+def test_dish_signature_matches_variants():
+    a = {"title": "Instant Pot Black-Eyed Peas"}
+    b = {"title": "Black-Eyed Peas with Coconut Milk and Ethiopian Spices"}
+    assert len(planner._dish_signature(a) & planner._dish_signature(b)) >= 2
+
+
 def test_deterministic():
     corpus = [mk(f"r{i}", ["carrot", "tomato"]) for i in range(6)]
     a = planner.build_plan(["carrot", "tomato"], corpus, set(), 4)

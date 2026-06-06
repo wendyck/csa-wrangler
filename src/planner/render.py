@@ -165,10 +165,14 @@ _CSS = """
       box-shadow:0 1px 3px rgba(0,0,0,.04);}
  .day h2{margin:0;padding:12px 18px;font-size:14px;text-transform:uppercase;letter-spacing:1.5px;
       color:#fff;background:var(--accent);}
- .card{display:flex;gap:18px;padding:18px;flex-wrap:wrap;}
- .card img{width:210px;height:150px;object-fit:cover;border-radius:10px;background:#eee;flex:0 0 auto;}
+ .card{display:flex;padding:18px;flex-wrap:wrap;}
+ /* margin (not flex `gap`) — Gmail strips gap but keeps margins, so this guarantees
+    space between the photo and the text. */
+ .card img{width:210px;height:150px;object-fit:cover;border-radius:10px;background:#eee;
+      flex:0 0 auto;margin:0 18px 0 0;}
  .noimg{width:210px;height:150px;border-radius:10px;background:#efe9df;flex:0 0 auto;display:flex;
-      align-items:center;justify-content:center;color:#b8ad9c;font-size:13px;letter-spacing:1px;}
+      align-items:center;justify-content:center;color:#b8ad9c;font-size:13px;letter-spacing:1px;
+      margin:0 18px 0 0;}
  .meta{flex:1;min-width:240px;}
  .meta h3{margin:2px 0 4px;font-size:20px;}
  .tag{color:var(--muted);font-size:13px;margin:0 0 10px;}
@@ -193,7 +197,7 @@ _CSS = """
  .pantry{background:#f3eee5;border-radius:10px;padding:14px 18px;}
  .pantry h3{color:#7a5a2a;}
  @media print{body{background:#fff}.day,.grocery{box-shadow:none}details{display:none}}
- @media(max-width:560px){.gcat ul{column-count:1}.card img,.noimg{width:100%;height:200px}}
+ @media(max-width:560px){.gcat ul{column-count:1}.card img,.noimg{width:100%;height:200px;margin:0 0 14px 0}}
 """
 
 

@@ -9,6 +9,9 @@ the last NO_REPEAT_WEEKS plans, build an N-night dinner plan that:
 
 Pure logic, no AWS. The corpus and history are passed in by the caller.
 """
+import re
+import unicodedata
+
 from .recipe_tagging import MEATS
 
 MEAT_CAP = 2  # at most this many of each meat protein per week
@@ -17,11 +20,35 @@ MEAT_CAP = 2  # at most this many of each meat protein per week
 # garlic side dish), so we don't suggest accompaniments for them.
 AROMATICS = {"garlic", "onion", "shallot", "scallion"}
 
+# Title words dropped when computing a dish signature — brands, cooking methods, and
+# generic filler that don't identify the dish.
+_TITLE_STOP = {
+    "instant", "pot", "pressure", "cooker", "slow", "easy", "best", "simple", "quick",
+    "homemade", "the", "with", "and", "recipe", "style", "healthier", "healthy", "classic",
+    "authentic", "one", "pan", "sheet", "skillet", "baked", "roasted", "grilled", "for",
+    "your", "super", "amazing", "crispy", "creamy", "perfect", "ultimate", "weeknight",
+    "made", "real", "our", "this", "that", "spicy", "southern", "sorta", "warm", "fresh",
+}
+_DISH_CONFLICT_MIN = 2  # shared signature words that mark two recipes as the "same dish"
+
 
 def recipe_id(rec):
     """Stable id for a recipe: the normalized recipe_url, falling back to title."""
     url = (rec.get("recipe_url") or "").strip().rstrip("/").lower()
     return url or "title:" + (rec.get("title") or "").strip().lower()
+
+
+def _dish_signature(rec):
+    """Significant words from a recipe title (accent-stripped, de-pluralized, stop-words
+    removed). Used to spot near-duplicate dishes for variety — e.g. every 'black-eyed
+    peas' variant shares {black, eyed, pea} even though their proteins differ."""
+    norm = unicodedata.normalize("NFKD", rec.get("title", "")).encode("ascii", "ignore").decode().lower()
+    sig = set()
+    for tok in re.split(r"[^a-z]+", norm):
+        tok = tok[:-1] if tok.endswith("s") and len(tok) > 3 else tok   # de-pluralize
+        if len(tok) >= 3 and tok not in _TITLE_STOP:
+            sig.add(tok)
+    return sig
 
 
 def _is_capped(protein, counts):
@@ -37,6 +64,7 @@ class _Selection:
         self.chosen = []          # list of recipe dicts, in pick order
         self.chosen_ids = set()
         self.protein_counts = {}
+        self.signatures = []      # dish signatures of chosen recipes
 
     @property
     def uncovered(self):
@@ -46,9 +74,16 @@ class _Selection:
         return (recipe_id(rec) not in self.chosen_ids
                 and not _is_capped(rec.get("protein", "vegetarian"), self.protein_counts))
 
+    def conflicts(self, rec):
+        """True if rec is the "same dish" as something already chosen (e.g. a second
+        black-eyed-peas recipe), by shared title signature."""
+        sig = _dish_signature(rec)
+        return any(len(sig & s) >= _DISH_CONFLICT_MIN for s in self.signatures)
+
     def add(self, rec):
         self.chosen.append(rec)
         self.chosen_ids.add(recipe_id(rec))
+        self.signatures.append(_dish_signature(rec))
         p = rec.get("protein", "vegetarian")
         self.protein_counts[p] = self.protein_counts.get(p, 0) + 1
         self.covered |= (set(rec.get("veggies", [])) & self.week)
@@ -61,18 +96,19 @@ def _new_coverage(rec, sel):
 def _cover_pass(sel, pool):
     """Greedy: repeatedly add the candidate covering the most still-uncovered veggies.
 
-    Tie-break by total veggie richness, then recipe_id for determinism.
+    Tie-break: prefer a recipe that isn't a duplicate dish, then total veggie richness,
+    then recipe_id for determinism.
     """
     while sel.uncovered:
         best = None
-        best_key = (0, 0, "")
+        best_key = (0, False, 0, "")
         for rec in pool:
             if not sel.can_add(rec):
                 continue
             gain = _new_coverage(rec, sel)
             if gain == 0:
                 continue
-            key = (gain, len(rec.get("veggies", [])), recipe_id(rec))
+            key = (gain, not sel.conflicts(rec), len(rec.get("veggies", [])), recipe_id(rec))
             if best is None or key > best_key:
                 best, best_key = rec, key
         if best is None:
@@ -166,7 +202,10 @@ def build_plan(week_veggies, corpus, recent_ids, nights):
             options = [r for r in candidates if sel.can_add(r)]
             if not options:
                 break
-            sel.add(max(options, key=lambda r: _variety_key(r, sel)))
+            # Prefer fillers that aren't a duplicate dish (avoids e.g. three different
+            # black-eyed-peas recipes in one week); fall back only if nothing else fits.
+            pool = [r for r in options if not sel.conflicts(r)] or options
+            sel.add(max(pool, key=lambda r: _variety_key(r, sel)))
 
     chosen_now = sel.chosen_ids
     fill_from([r for r in mains if recipe_id(r) not in recent_ids and recipe_id(r) not in chosen_now])
