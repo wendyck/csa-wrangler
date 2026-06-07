@@ -178,6 +178,25 @@ those need a headless browser.
 usually right (they're accompaniments, not dinners). Hand-correct it in the JSON if you
 disagree.
 
+### Rating recipes (👍 / 👎)
+
+Each recipe can carry an optional `rating` of `"up"` or `"down"` (absent = unrated). The
+planner prefers **👍 first, then unrated, then 👎** — within all the usual rules (veggie
+coverage, protein variety, 3-week no-repeat). To rate:
+
+```bash
+# 1. generate a standalone rating page (pre-filled with current ratings)
+python scripts/make_rating_page.py --corpus recipes_tagged.json --out recipe_ratings.html
+# 2. open recipe_ratings.html in a browser, click 👍/👎 per recipe (ratings persist in
+#    localStorage), then click "Download ratings JSON"
+# 3. merge the downloaded file into the corpus and re-upload
+python scripts/apply_ratings.py --ratings ~/Downloads/ratings.json --corpus recipes_tagged.json
+aws s3 cp recipes_tagged.json s3://<bucket>/corpus/recipes_tagged.json
+```
+
+Re-runnable: regenerate the page anytime to rate more recipes as you cook; the page reflects
+the corpus's current ratings and `apply_ratings.py` is idempotent.
+
 ## Configuration
 
 Non-secret config lives in **SSM Parameter Store** under `/csa-wrangler/` (env vars override it,

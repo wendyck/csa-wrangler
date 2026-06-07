@@ -55,6 +55,14 @@ def _is_capped(protein, counts):
     return protein in MEATS and counts.get(protein, 0) >= MEAT_CAP
 
 
+# Rating preference: thumbs-up first, then unrated, then thumbs-down (lower rank = better).
+_RATING_RANKS = (0, 1, 2)
+
+
+def _rating_rank(rec):
+    return {"up": 0, "down": 2}.get(rec.get("rating"), 1)
+
+
 class _Selection:
     """Tracks chosen recipes, covered veggies, and protein counts as we build the plan."""
 
@@ -156,9 +164,10 @@ def _suggest_sides(week_veggies, corpus, recent_ids, mains):
         if not cands:
             continue
         fresh = [s for s in cands if recipe_id(s) not in recent_ids]
-        # Any side that uses this veggie qualifies (it needn't be the star); among them
-        # prefer one that uses the most of this week's CSA veggies, to use up the share.
-        side = max(fresh or cands, key=lambda s: (len(set(s.get("veggies", [])) & week), recipe_id(s)))
+        # Any side that uses this veggie qualifies (it needn't be the star); prefer a
+        # better-rated one, then one that uses the most of this week's CSA veggies.
+        side = max(fresh or cands,
+                   key=lambda s: (-_rating_rank(s), len(set(s.get("veggies", [])) & week), recipe_id(s)))
         # Prefer a free night whose main lacks this veggie; else any free night.
         target = next((i for i in night_order if side_by_night[i] is None
                        and veg not in set(mains[i].get("veggies", []))), None)
@@ -178,25 +187,29 @@ def build_plan(week_veggies, corpus, recent_ids, nights):
     """
     recent_ids = set(recent_ids or ())
     mains = [r for r in corpus if r.get("dish_type") == "main"]
-
     relevant = [r for r in mains if set(r.get("veggies", [])) & set(week_veggies)]
-    fresh = [r for r in relevant if recipe_id(r) not in recent_ids]
-    recent = [r for r in relevant if recipe_id(r) in recent_ids]
+
+    def tier(pool, fresh, rank):
+        """The slice of `pool` that is fresh/recent as requested and has the given rating."""
+        return [r for r in pool
+                if (recipe_id(r) not in recent_ids) == fresh and _rating_rank(r) == rank]
 
     sel = _Selection(week_veggies)
 
-    # 1. Cover veggies with fresh recipes.
-    _cover_pass(sel, fresh)
+    # 1. Cover veggies with fresh recipes, best rating first (up -> unrated -> down).
+    for rank in _RATING_RANKS:
+        _cover_pass(sel, tier(relevant, fresh=True, rank=rank))
 
-    # 2. Forced-repeat exception: a still-uncovered veggie that ONLY recent recipes touch.
+    # 2. Forced-repeat exception: a veggie only recent recipes can cover. Still rating-ordered.
     forced = []
     if sel.uncovered:
-        coverable_recent = [r for r in recent if _new_coverage(r, sel) > 0]
         _before = set(sel.chosen_ids)
-        _cover_pass(sel, coverable_recent)
+        for rank in _RATING_RANKS:
+            coverable = [r for r in tier(relevant, fresh=False, rank=rank) if _new_coverage(r, sel) > 0]
+            _cover_pass(sel, coverable)
         forced = [rid for rid in sel.chosen_ids - _before]
 
-    # 3. Fill remaining nights with variety. Prefer fresh mains; fall back to recent if short.
+    # 3. Fill remaining nights with variety, again best rating first, fresh before recent.
     def fill_from(candidates):
         while len(sel.chosen) < nights:
             options = [r for r in candidates if sel.can_add(r)]
@@ -207,10 +220,11 @@ def build_plan(week_veggies, corpus, recent_ids, nights):
             pool = [r for r in options if not sel.conflicts(r)] or options
             sel.add(max(pool, key=lambda r: _variety_key(r, sel)))
 
-    chosen_now = sel.chosen_ids
-    fill_from([r for r in mains if recipe_id(r) not in recent_ids and recipe_id(r) not in chosen_now])
-    if len(sel.chosen) < nights:  # corpus exhausted of fresh mains; allow recent for variety
-        fill_from([r for r in mains if recipe_id(r) not in sel.chosen_ids])
+    for fresh in (True, False):
+        for rank in _RATING_RANKS:
+            if len(sel.chosen) >= nights:
+                break
+            fill_from(tier(mains, fresh=fresh, rank=rank))
 
     # 4. Suggest a veggie side dish per night (protein main + veg side).
     sides, side_ids = _suggest_sides(week_veggies, corpus, recent_ids, sel.chosen)

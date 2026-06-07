@@ -129,6 +129,51 @@ def test_dish_signature_matches_variants():
     assert len(planner._dish_signature(a) & planner._dish_signature(b)) >= 2
 
 
+def mkr(title, veggies, rating=None, **kw):
+    r = mk(title, veggies, **kw)
+    if rating:
+        r["rating"] = rating
+    return r
+
+
+def test_thumbs_up_preferred_over_unrated_and_down():
+    corpus = [
+        mkr("down one", ["carrot"], rating="down", protein="beef"),
+        mkr("unrated one", ["carrot"], protein="chicken"),
+        mkr("up one", ["carrot"], rating="up", protein="pork"),
+    ]
+    plan = planner.build_plan(["carrot"], corpus, set(), nights=1)
+    assert plan["recipes"][0]["title"] == "up one"
+
+
+def test_fills_up_then_unrated_then_down_in_order():
+    corpus = [
+        mkr("up A", ["tomato"], rating="up", protein="pork"),
+        mkr("unrated B", ["tomato"], protein="chicken"),
+        mkr("down C", ["tomato"], rating="down", protein="beef"),
+    ]
+    plan = planner.build_plan(["tomato"], corpus, set(), nights=3)
+    order = [r["title"] for r in plan["recipes"]]
+    assert order.index("up A") < order.index("unrated B") < order.index("down C")
+
+
+def test_thumbs_down_used_only_as_last_resort():
+    # the only recipe covering 'beet' is thumbs-down -> still used (better than uncovered)
+    corpus = [
+        mkr("beet stew", ["beet"], rating="down", protein="beef"),
+        mkr("plain unrated", ["tomato"], protein="chicken"),
+    ]
+    plan = planner.build_plan(["beet"], corpus, set(), nights=1)
+    assert "beet" in plan["veggies_covered"]
+    assert plan["recipes"][0]["title"] == "beet stew"
+
+
+def test_unrated_recipes_default_to_middle_tier():
+    assert planner._rating_rank({"title": "x"}) == 1
+    assert planner._rating_rank({"rating": "up"}) == 0
+    assert planner._rating_rank({"rating": "down"}) == 2
+
+
 def test_deterministic():
     corpus = [mk(f"r{i}", ["carrot", "tomato"]) for i in range(6)]
     a = planner.build_plan(["carrot", "tomato"], corpus, set(), 4)
