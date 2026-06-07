@@ -27,6 +27,18 @@ def test_prep_words_dont_misfile_aromatics_as_protein():
     assert render.categorize("1 lb ground beef") == "protein"
 
 
+def test_keywords_dont_match_inside_longer_words():
+    # 'chard' must not fire inside 'Chardonnay', etc. (whole-word matching)
+    assert render.categorize("1/4 cup dry white wine (Chardonnay or Sauvignon Blanc)") == "other"
+    assert render.categorize("2 cups dry red wine") == "other"
+    assert render.categorize("1 large eggplant, cubed") == "produce"      # not dairy via 'egg'
+    assert render.categorize("1/4 cup peanuts, chopped") != "produce"     # not produce via 'pea'
+    # plurals still classify correctly
+    assert render.categorize("2 carrots, diced") == "produce"
+    assert render.categorize("3 cups chopped tomatoes") == "produce"
+    assert render.categorize("1 bunch rainbow chard") == "produce"        # real chard still works
+
+
 def test_csa_veggies_subtracted_from_grocery():
     r = {"title": "Carrot Soup", "ingredients": ["1 lb carrots, peeled", "2 cups water", "1 onion"],
          "veggies": ["carrot", "onion"]}

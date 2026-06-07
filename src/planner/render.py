@@ -18,7 +18,7 @@ _DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Satu
 STARCH = ["noodle", "pasta", "penne", "elicoidali", "spaghetti", "macaroni", "rigatoni", "ziti"]
 PANTRY = [
     "salt", "olive oil", "vegetable oil", "sesame oil", "canola oil", "neutral oil",
-    "cooking oil", " oil", "sugar", "brown sugar", "flour", "cornstarch", "corn starch",
+    "cooking oil", "oil", "sugar", "brown sugar", "flour", "cornstarch", "corn starch",
     "cornflour", "baking powder", "baking soda", "soy sauce", "fish sauce", "oyster sauce",
     "rice vinegar", "vinegar", "mirin", "sake", "shaoxing", "honey", "maple syrup", "broth",
     "stock", "water", "cumin", "paprika", "turmeric", "coriander", "cinnamon", "curry powder",
@@ -42,8 +42,9 @@ PRODUCE = ["onion", "garlic", "ginger", "carrot", "potato", "tomato", "pepper", 
            "mushroom", "spinach", "cucumber", "scallion", "green onion", "shallot", "lemon",
            "lime", "cilantro", "parsley", "basil", "broccoli", "cauliflower", "kale", "chard",
            "cabbage", "celery", "fennel", "leek", "pea", "bean", "eggplant", "squash", "herb",
-           "lettuce", "dill", "mint", "jalap", "chile", "chili pepper", "ginger", "corn",
-           "beet", "apple", "avocado", "radish", "arugula", "asparagus", "sprout"]
+           "lettuce", "dill", "mint", "jalapeno", "jalapeño", "chile", "chili pepper",
+           "ginger", "corn", "beet", "apple", "avocado", "radish", "arugula", "asparagus",
+           "sprout"]
 
 # A "pepper" mention is a pantry spice only as ground/peppercorn/flakes; bell & sweet
 # peppers (and most fresh chiles) are produce.  This is the §5/§7 pepper-guard fix.
@@ -53,6 +54,20 @@ _PANTRY_PEPPER = re.compile(r"\b(?:black|white|ground|cracked|whole)\s+pepper(?:
                             r"|\bpeppercorns?\b|\bpepper\s+flakes?\b|\bflaked?\s+pepper\b")
 _PRODUCE_PEPPER = re.compile(r"\b(?:bell|sweet|red|green|yellow|orange|poblano|serrano|"
                              r"jalape|anaheim|banana|cubanelle|shishito)\w*\s*pepper")
+
+
+def _kw_re(words):
+    """Match any keyword as a whole word (allowing a trailing plural), so a keyword can't
+    fire inside a longer word — e.g. 'chard' must not match 'Chardonnay', 'pea' not
+    'peanut', 'egg' not 'eggplant'."""
+    alts = "|".join(re.escape(w) for w in sorted(words, key=len, reverse=True))
+    return re.compile(r"\b(?:" + alts + r")(?:es|s)?\b")
+
+
+_PANTRY_RE = _kw_re(PANTRY)
+_PROTEIN_RE = _kw_re(PROTEIN)
+_DAIRY_RE = _kw_re(DAIRY)
+_PRODUCE_RE = _kw_re(PRODUCE)
 
 
 def categorize(line):
@@ -65,18 +80,14 @@ def categorize(line):
         if _PRODUCE_PEPPER.search(l):            # bell/sweet/chile peppers are produce
             return "produce"
         # otherwise ambiguous ("salt and pepper to taste") -> fall through to keyword logic
-    for kw in PANTRY:
-        if kw in l:
-            return "pantry"
-    for kw in PROTEIN:
-        if re.search(r"\b" + re.escape(kw), l):
-            return "protein"
-    for kw in DAIRY:
-        if kw in l:
-            return "dairy"
-    for kw in PRODUCE:
-        if kw in l:
-            return "produce"
+    if _PANTRY_RE.search(l):
+        return "pantry"
+    if _PROTEIN_RE.search(l):
+        return "protein"
+    if _DAIRY_RE.search(l):
+        return "dairy"
+    if _PRODUCE_RE.search(l):
+        return "produce"
     return "other"
 
 
@@ -111,7 +122,7 @@ def _ingredient_key(line):
     else a quantity-stripped version of the text so similar lines still group."""
     low = re.sub(r"\([^)]*\)", " ", line.lower())
     for term in _GROUP_TERMS:
-        if re.search(r"\b" + re.escape(term), low):
+        if re.search(r"\b" + re.escape(term) + r"(?:es|s)?\b", low):
             return term
     cleaned = _QTY_RE.sub(" ", low.split(",")[0])
     return re.sub(r"\s+", " ", cleaned).strip()
