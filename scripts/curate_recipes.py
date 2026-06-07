@@ -44,12 +44,16 @@ def main():
         by_url.setdefault(norm(r.get("recipe_url", "")), []).append(r)
 
     remove_keys, missing = set(), []
-    removed = reclassified = unchanged = 0
+    removed = already_removed = reclassified = unchanged = 0
     for e in edits:
         k = norm(e["url"])
         recs = by_url.get(k)
         if not recs:
-            missing.append(e["url"])
+            # A remove whose recipe is already gone is idempotent, not an error; only a
+            # set-edit with no match is a possible typo worth reporting.
+            already_removed += bool(e.get("remove"))
+            if not e.get("remove"):
+                missing.append(e["url"])
             continue
         if e.get("remove"):
             remove_keys.add(k)
@@ -66,8 +70,8 @@ def main():
 
     new_corpus = [r for r in corpus if norm(r.get("recipe_url", "")) not in remove_keys]
 
-    print(f"edits: {len(edits)} | removed {removed}, reclassified {reclassified}, "
-          f"already-correct {unchanged}, unmatched {len(missing)}")
+    print(f"edits: {len(edits)} | removed {removed} (already-gone {already_removed}), "
+          f"reclassified {reclassified}, already-correct {unchanged}, unmatched {len(missing)}")
     print(f"corpus: {len(corpus)} -> {len(new_corpus)} recipes")
     if missing:
         print("UNMATCHED urls (no recipe found — check the URL):")
