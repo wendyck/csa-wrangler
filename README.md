@@ -197,6 +197,22 @@ aws s3 cp recipes_tagged.json s3://<bucket>/corpus/recipes_tagged.json
 Re-runnable: regenerate the page anytime to rate more recipes as you cook; the page reflects
 the corpus's current ratings and `apply_ratings.py` is idempotent.
 
+### Fixing / removing recipes
+
+To reclassify fields or drop bad entries (how-tos, ingredients, mis-tagged sides) in bulk,
+list them in a JSON edits file and run `curate_recipes.py`:
+
+```bash
+# recipe_edits.json: [{"url": "…", "dish_type": "side"}, {"url": "…", "remove": true}, …]
+python scripts/curate_recipes.py --edits recipe_edits.json --corpus recipes_tagged.json --dry-run
+python scripts/curate_recipes.py --edits recipe_edits.json --corpus recipes_tagged.json
+aws s3 cp recipes_tagged.json s3://<bucket>/corpus/recipes_tagged.json
+```
+
+Settable fields: `dish_type`, `protein`, `is_pasta`, `rating`, `title`. URLs match regardless
+of `http`/`https`, a leading `www.`, query string, or trailing slash; unmatched URLs are
+reported (re-runnable and idempotent). Dry-run first to confirm everything matches.
+
 ## Configuration
 
 Non-secret config lives in **SSM Parameter Store** under `/csa-wrangler/` (env vars override it,

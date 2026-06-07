@@ -229,6 +229,7 @@ needs_manual*.csv
 add_failures.csv
 recipe_ratings.html
 ratings.json
+recipe_edits.json
 
 # Build artifacts, tooling state, macOS cruft
 .aws-sam/
