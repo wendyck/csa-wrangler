@@ -235,3 +235,6 @@ recipe_edits.json
 .aws-sam/
 .gstack/
 .DS_Store
+
+# SAM deploy config — contains the AWS account id, profile, and recipient email
+samconfig.toml

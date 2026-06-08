@@ -20,6 +20,10 @@ MEAT_CAP = 2  # at most this many of each meat protein per week
 # garlic side dish), so we don't suggest accompaniments for them.
 AROMATICS = {"garlic", "onion", "shallot", "scallion"}
 
+# Veggies the CSA tends to send in bulk: when one of these is in the share we try to fill
+# every spare side slot with dishes using it, to help work through the pile. Extend as needed.
+ABUNDANT_VEGGIES = {"carrot"}
+
 # Title words dropped when computing a dish signature — brands, cooking methods, and
 # generic filler that don't identify the dish.
 _TITLE_STOP = {
@@ -142,7 +146,9 @@ def _suggest_sides(week_veggies, corpus, recent_ids, mains):
 
     Heuristics: prefer veggies no main already uses (use up the share first); prefer fresh
     sides over recently-used; pair to a meat-protein night whose main doesn't already carry
-    that veggie, so each suggestion adds variety rather than doubling up.
+    that veggie, so each suggestion adds variety rather than doubling up. A main that uses no
+    veggies at all (e.g. a plain salmon) is guaranteed a veggie side so no night goes out
+    without a vegetable.
     """
     week = set(week_veggies)
     sides = [r for r in corpus if r.get("dish_type") == "side" and set(r.get("veggies", [])) & week]
@@ -151,23 +157,32 @@ def _suggest_sides(week_veggies, corpus, recent_ids, mains):
         return side_by_night, []
 
     main_veg = set().union(*[set(m.get("veggies", [])) for m in mains])
-    # Feature veggies only (skip aromatics). Veggies the mains miss come first; nights
-    # with a meat main come first.
+    # Mains that bring no real vegetable of their own most need a side alongside. Aromatics
+    # (garlic/onion/shallot) don't count as a vegetable here — a clam linguine seasoned with
+    # garlic is still a bare-protein night that wants a green side.
+    main_has_veg = [bool(set(m.get("veggies", [])) - AROMATICS) for m in mains]
+    # Feature veggies only (skip aromatics). Veggies the mains miss come first; veggie-less
+    # mains come first among nights, then meat mains.
     targets = week - AROMATICS
     veg_order = sorted(targets, key=lambda v: (v in main_veg, v))
     night_order = sorted(range(len(mains)),
-                         key=lambda i: (mains[i].get("protein") not in MEATS, i))
+                         key=lambda i: (main_has_veg[i], mains[i].get("protein") not in MEATS, i))
 
     used = set()
+
+    def best_side(cands):
+        """Pick among candidate sides: fresh over recent, then better rating, then the one
+        using the most of this week's CSA veggies (it needn't feature the veggie)."""
+        fresh = [s for s in cands if recipe_id(s) not in recent_ids]
+        return max(fresh or cands,
+                   key=lambda s: (-_rating_rank(s), len(set(s.get("veggies", [])) & week), recipe_id(s)))
+
+    # Pass 1: cover this week's CSA veggies with sides, one veggie at a time.
     for veg in veg_order:
         cands = [s for s in sides if veg in s.get("veggies", []) and recipe_id(s) not in used]
         if not cands:
             continue
-        fresh = [s for s in cands if recipe_id(s) not in recent_ids]
-        # Any side that uses this veggie qualifies (it needn't be the star); prefer a
-        # better-rated one, then one that uses the most of this week's CSA veggies.
-        side = max(fresh or cands,
-                   key=lambda s: (-_rating_rank(s), len(set(s.get("veggies", [])) & week), recipe_id(s)))
+        side = best_side(cands)
         # Prefer a free night whose main lacks this veggie; else any free night.
         target = next((i for i in night_order if side_by_night[i] is None
                        and veg not in set(mains[i].get("veggies", []))), None)
@@ -177,6 +192,32 @@ def _suggest_sides(week_veggies, corpus, recent_ids, mains):
             break  # every night already has a suggested side
         side_by_night[target] = side
         used.add(recipe_id(side))
+
+    # Pass 2: use up an abundant veggie (carrots — the CSA sends a pile) by filling every
+    # still-empty side slot with another dish that uses it, as far as distinct recipes allow.
+    for veg in sorted((week & ABUNDANT_VEGGIES) - AROMATICS):
+        for i in night_order:
+            if side_by_night[i] is not None:
+                continue
+            cands = [s for s in sides if veg in s.get("veggies", []) and recipe_id(s) not in used]
+            if not cands:
+                break  # no more distinct sides for this veggie
+            side = best_side(cands)
+            side_by_night[i] = side
+            used.add(recipe_id(side))
+
+    # Pass 3: guarantee a veggie side for any night whose main brings no real vegetable
+    # (aromatics aside), even if this week's veggies are already covered above.
+    for i in night_order:
+        if main_has_veg[i] or side_by_night[i] is not None:
+            continue
+        cands = [s for s in sides if recipe_id(s) not in used]
+        if not cands:
+            break  # no fresh side recipes left to assign
+        side = best_side(cands)
+        side_by_night[i] = side
+        used.add(recipe_id(side))
+
     return side_by_night, [recipe_id(s) for s in side_by_night if s]
 
 

@@ -24,7 +24,7 @@ _DEFAULTS = {
     "RECIPIENT_EMAIL": "",
     "FROM_EMAIL": "",
     "NIGHTS_PER_WEEK": "6",
-    "NO_REPEAT_WEEKS": "3",
+    "NO_REPEAT_WEEKS": "5",
     "CORPUS_S3_KEY": "corpus/recipes_tagged.json",
 }
 
@@ -60,4 +60,4 @@ def nights_per_week():
 
 
 def no_repeat_weeks():
-    return int(get("NO_REPEAT_WEEKS") or 3)
+    return int(get("NO_REPEAT_WEEKS") or 5)

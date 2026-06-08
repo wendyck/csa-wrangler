@@ -180,12 +180,19 @@ _MOBILE_CSS = ("@media only screen and (max-width:560px){"
                ".ph .photo{width:100%!important;height:200px!important;margin:0 0 12px 0!important}}")
 
 
+def _uses_note(rec, week_veggies):
+    """'carrot &amp; kale' for the CSA veggies a recipe uses, or '' if it uses none."""
+    week = set(week_veggies)
+    uses = [v for v in rec.get("veggies", []) if v in week]
+    return " &amp; ".join(_esc(v) for v in uses)
+
+
 def _side_block(side, week_veggies):
     """Render the 'suggested side' accompaniment for a night, or '' if none."""
     if not side:
         return ""
-    uses = [v for v in side.get("veggies", []) if v in set(week_veggies)]
-    uses_txt = (" — uses your " + " &amp; ".join(_esc(v) for v in uses)) if uses else ""
+    uses = _uses_note(side, week_veggies)
+    uses_txt = (" — uses your " + uses) if uses else ""
     url = side.get("recipe_url")
     name = (f'<a href="{_esc(url)}" target="_blank" style="{_LINK}">{_esc(side.get("title"))} &rarr;</a>'
             if url else _esc(side.get("title")))
@@ -263,6 +270,10 @@ def render_html(plan, week_veggies, week_label="This Week's Dinners"):
         P.append('<td class="mt" valign="top" style="vertical-align:top;">'
                  f'<h3 style="margin:0 0 4px;font-size:20px;color:{_INK};">{_esc(r.get("title"))}</h3>'
                  f'<p style="margin:0 0 10px;color:{_MUTED};font-size:13px;">{_esc(_tag_of(r))}</p>')
+        uses = _uses_note(r, week_veggies)
+        if uses:
+            P.append(f'<p style="margin:-4px 0 10px;color:{_ACCENT};font-size:13px;font-weight:600;">'
+                     f'Uses your {uses}</p>')
         links = []
         if url:
             links.append(f'<a href="{_esc(url)}" target="_blank" style="{_LINK}">Recipe &rarr;</a>')

@@ -27,7 +27,7 @@ Parameters:
     Default: 6
   NoRepeatWeeks:
     Type: Number
-    Default: 3
+    Default: 5
 
 Globals:
   Function:

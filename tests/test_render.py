@@ -92,6 +92,21 @@ def test_suggested_side_rendered():
     assert "butter" in out.lower()
 
 
+def test_main_flags_csa_veggies_used():
+    plan = {"recipes": [{"title": "Carrot Kale Stew", "recipe_url": "http://x", "ingredients": [],
+                         "veggies": ["carrot", "kale", "potato"], "protein": "beef", "is_pasta": False}]}
+    out = render.render_html(plan, week_veggies=["carrot", "kale"])
+    assert "Uses your carrot &amp; kale" in out      # only this week's CSA veggies, not potato
+    assert "potato" not in out
+
+
+def test_main_with_no_csa_veggies_has_no_uses_line():
+    plan = {"recipes": [{"title": "Plain Salmon", "recipe_url": "http://x", "ingredients": [],
+                         "veggies": [], "protein": "fish", "is_pasta": False}]}
+    out = render.render_html(plan, week_veggies=["carrot"])
+    assert "Uses your" not in out
+
+
 def test_real_week_render_smoke(corpus):
     plan = planner.build_plan(["carrot", "tomato", "kale"], corpus, recent_ids=set(), nights=6)
     html = render.render_html(plan, ["carrot", "tomato", "kale"], week_label="CSA Week Test")

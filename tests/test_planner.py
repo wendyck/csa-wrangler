@@ -97,6 +97,49 @@ def test_side_pairs_to_meat_night_lacking_the_veggie():
     assert plan["sides"][night] and plan["sides"][night]["title"] == "carrot-side"
 
 
+def test_veggieless_main_guaranteed_a_side():
+    # a main with no veggies of its own must still get a veggie side, even when this week's
+    # veggie is already used by another night's main.
+    corpus = [mk("carrot-veg-main", ["carrot"], protein="vegetarian"),
+              mk("plain-salmon", [], protein="fish"),
+              mk("garlic-clam-linguine", ["garlic"], protein="fish", is_pasta=True),
+              mk("glazed-carrots", ["carrot"], dish_type="side"),
+              mk("buttered-radish", ["carrot"], dish_type="side")]
+    plan = planner.build_plan(["carrot"], corpus, set(), nights=3)
+    by_title = {r["title"]: i for i, r in enumerate(plan["recipes"])}
+    # truly veggie-less main and an aromatics-only main both get a veggie side
+    assert plan["sides"][by_title["plain-salmon"]]
+    assert plan["sides"][by_title["garlic-clam-linguine"]]
+
+
+def test_abundant_veggie_fills_spare_side_slots():
+    # carrots come in bulk -> after each veggie is covered once, spare side slots should
+    # soak up extra carrot dishes rather than sit empty.
+    corpus = [mk("beef-main", ["tomato"], protein="beef"),
+              mk("pork-main", ["tomato"], protein="pork"),
+              mk("chicken-main", ["tomato"], protein="chicken"),
+              mk("veg-main", ["tomato"], protein="vegetarian"),
+              mk("carrot-side-a", ["carrot"], dish_type="side"),
+              mk("carrot-side-b", ["carrot"], dish_type="side"),
+              mk("carrot-side-c", ["carrot"], dish_type="side"),
+              mk("turnip-side", ["turnip"], dish_type="side")]
+    plan = planner.build_plan(["carrot", "turnip"], corpus, set(), nights=4)
+    side_titles = [s["title"] for s in plan["sides"] if s]
+    assert len(side_titles) == 4                                  # every spare slot filled
+    assert sum("carrot-side" in t for t in side_titles) == 3      # all 3 carrot dishes used
+    assert "turnip-side" in side_titles                           # turnip still used once
+
+
+def test_abundant_pass_skipped_when_veggie_absent():
+    # no carrots in the share -> no extra carrot-stuffing; a single turnip side suffices
+    corpus = [mk("beef-main", ["tomato"], protein="beef"),
+              mk("pork-main", ["tomato"], protein="pork"),
+              mk("turnip-side-a", ["turnip"], dish_type="side"),
+              mk("turnip-side-b", ["turnip"], dish_type="side")]
+    plan = planner.build_plan(["turnip"], corpus, set(), nights=2)
+    assert sum(1 for s in plan["sides"] if s) == 1   # one turnip side, not both slots filled
+
+
 def test_recent_sides_avoided():
     corpus = [mk("main", ["tomato"], protein="chicken"),
               mk("side-old", ["carrot"], dish_type="side"),
