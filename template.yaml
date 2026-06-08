@@ -153,7 +153,9 @@ Resources:
         - DynamoDBCrudPolicy: { TableName: !Ref HistoryTable }
         - Statement:
             - Effect: Allow
-              Action: ses:SendEmail
+              # SendRawEmail is used when the plan embeds cookbook dish photos inline (MIME);
+              # SendEmail is the plain path for online-only weeks.
+              Action: [ses:SendEmail, ses:SendRawEmail]
               # Least privilege: only this app's own identities (sending domain + recipient),
               # and only as the plan From address. The recipient identity is required while
               # in the SES sandbox, which authorizes SendEmail against verified recipients.

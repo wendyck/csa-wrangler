@@ -66,15 +66,43 @@ def test_grocery_clusters_like_ingredients():
 def test_pinterest_link_omitted_without_pin_url():
     plan = {"recipes": [{"title": "Manual Recipe", "recipe_url": "http://x", "ingredients": [],
                          "veggies": [], "protein": "vegetarian", "is_pasta": False}]}
-    out = render.render_html(plan, week_veggies=[])
+    out, _ = render.render_html(plan, week_veggies=[])
     assert "Pinterest" not in out
 
 
 def test_image_fallback_placeholder():
     plan = {"recipes": [{"title": "No Photo", "recipe_url": "http://x", "ingredients": [],
                          "veggies": [], "protein": "fish", "is_pasta": False}]}
-    out = render.render_html(plan, week_veggies=[])
+    out, _ = render.render_html(plan, week_veggies=[])
     assert "no photo" in out and "<img" not in out
+
+
+def test_cookbook_recipe_inline_photo_and_source_label():
+    plan = {"recipes": [{
+        "title": "One Pot Cajun Chicken and Rice", "cookbook": "RecipeTinEats Dinner",
+        "photo_s3_key": "cookbook-photos/recipetineats-dinner/one-pot-cajun-chicken-and-rice-food.jpg",
+        "ingredients": ["1 lb chicken thighs", "1 cup rice"],
+        "veggies": [], "protein": "chicken", "is_pasta": False,
+    }]}
+    out, images = render.render_html(plan, week_veggies=[])
+    # dish photo embedded inline via cid:, and that cid is reported to the caller for attaching
+    assert 'src="cid:photo0"' in out
+    assert images == [{"cid": "photo0", "s3_key": plan["recipes"][0]["photo_s3_key"]}]
+    # source is named, not linked; no Recipe/Pinterest links for a cookbook recipe
+    assert "From <span" in out and "RecipeTinEats Dinner" in out
+    assert "Recipe &rarr;" not in out and "Pinterest" not in out
+
+
+def test_cookbook_recipe_without_dish_photo_uses_placeholder():
+    plan = {"recipes": [{
+        "title": "The Aussie Chop Salad", "cookbook": "RecipeTinEats Dinner",
+        "ingredients": ["1 head lettuce"], "veggies": [], "protein": "vegetarian",
+        "is_pasta": False,
+    }]}
+    out, images = render.render_html(plan, week_veggies=[])
+    assert images == []                       # nothing to embed
+    assert "no photo" in out                  # falls back to the neutral placeholder
+    assert "From <span" in out                # still labels the cookbook source
 
 
 def test_suggested_side_rendered():
@@ -84,7 +112,7 @@ def test_suggested_side_rendered():
         "sides": [{"title": "Glazed Carrots", "recipe_url": "http://y",
                    "ingredients": ["1 lb carrots", "2 tbsp butter"], "veggies": ["carrot"]}],
     }
-    out = render.render_html(plan, week_veggies=["carrot"])
+    out, _ = render.render_html(plan, week_veggies=["carrot"])
     assert "Suggested side" in out
     assert "Glazed Carrots" in out
     assert "uses your carrot" in out
@@ -95,7 +123,7 @@ def test_suggested_side_rendered():
 def test_main_flags_csa_veggies_used():
     plan = {"recipes": [{"title": "Carrot Kale Stew", "recipe_url": "http://x", "ingredients": [],
                          "veggies": ["carrot", "kale", "potato"], "protein": "beef", "is_pasta": False}]}
-    out = render.render_html(plan, week_veggies=["carrot", "kale"])
+    out, _ = render.render_html(plan, week_veggies=["carrot", "kale"])
     assert "Uses your carrot &amp; kale" in out      # only this week's CSA veggies, not potato
     assert "potato" not in out
 
@@ -103,13 +131,13 @@ def test_main_flags_csa_veggies_used():
 def test_main_with_no_csa_veggies_has_no_uses_line():
     plan = {"recipes": [{"title": "Plain Salmon", "recipe_url": "http://x", "ingredients": [],
                          "veggies": [], "protein": "fish", "is_pasta": False}]}
-    out = render.render_html(plan, week_veggies=["carrot"])
+    out, _ = render.render_html(plan, week_veggies=["carrot"])
     assert "Uses your" not in out
 
 
 def test_real_week_render_smoke(corpus):
     plan = planner.build_plan(["carrot", "tomato", "kale"], corpus, recent_ids=set(), nights=6)
-    html = render.render_html(plan, ["carrot", "tomato", "kale"], week_label="CSA Week Test")
+    html, _ = render.render_html(plan, ["carrot", "tomato", "kale"], week_label="CSA Week Test")
     assert html.startswith("<!DOCTYPE html>")
     assert html.count('class="day"') == 6
     assert "Grocery List" in html

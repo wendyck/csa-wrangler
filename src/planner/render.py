@@ -224,10 +224,16 @@ def render_html(plan, week_veggies, week_label="This Week's Dinners"):
     meal_plan.html mockup looks (cream page, white rounded cards, accent day headers)
     across email clients — Gmail strips `<style>` reliance, CSS variables, body
     backgrounds, and flex `gap`.
+
+    Returns (html, inline_images), where inline_images is a list of
+    {"cid": ..., "s3_key": ...} for cookbook dish photos the email must embed via `cid:`
+    (online recipes hotlink their image URL and aren't listed here). The caller fetches
+    each photo's bytes and attaches it; see stores.send_email.
     """
     recipes = plan["recipes"]
     sides = plan.get("sides") or [None] * len(recipes)
     veg_line = ", ".join(week_veggies) if week_veggies else "your share"
+    inline_images = []
 
     P = ['<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">',
          '<meta name="viewport" content="width=device-width, initial-scale=1">',
@@ -248,7 +254,16 @@ def render_html(plan, week_veggies, week_label="This Week's Dinners"):
 
     for i, r in enumerate(recipes):
         day = _DAYS[i] if i < len(_DAYS) else f"Night {i + 1}"
-        im, url, pin = _img_of(r), r.get("recipe_url"), r.get("pin_url")
+        url, pin = r.get("recipe_url"), r.get("pin_url")
+        # A cookbook recipe's dish photo lives in S3 (private) and is embedded inline via
+        # cid:; an online recipe hotlinks its image URL. cookbook_photo wins when present.
+        cookbook_photo = r.get("photo_s3_key")
+        if cookbook_photo:
+            cid = f"photo{i}"
+            inline_images.append({"cid": cid, "s3_key": cookbook_photo})
+            im = f"cid:{cid}"
+        else:
+            im = _img_of(r)
         P.append('<tr><td class="day" style="padding-bottom:22px;">'
                  '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
                  f'bgcolor="#ffffff" style="background:#ffffff;border:1px solid {_LINE};border-radius:14px;'
@@ -274,13 +289,19 @@ def render_html(plan, week_veggies, week_label="This Week's Dinners"):
         if uses:
             P.append(f'<p style="margin:-4px 0 10px;color:{_ACCENT};font-size:13px;font-weight:600;">'
                      f'Uses your {uses}</p>')
-        links = []
-        if url:
-            links.append(f'<a href="{_esc(url)}" target="_blank" style="{_LINK}">Recipe &rarr;</a>')
-        if pin:
-            links.append(f'<a href="{_esc(pin)}" target="_blank" style="{_LINK}">Pinterest pin &rarr;</a>')
-        if links:
-            P.append('<p style="margin:0;font-size:14px;">' + " &nbsp;&nbsp; ".join(links) + "</p>")
+        cookbook = r.get("cookbook")
+        if cookbook:
+            # Cookbook recipes have no URL/pin — name the source instead of linking.
+            P.append('<p style="margin:0;font-size:14px;color:#5a5249;">From '
+                     f'<span style="font-weight:600;">{_esc(cookbook)}</span></p>')
+        else:
+            links = []
+            if url:
+                links.append(f'<a href="{_esc(url)}" target="_blank" style="{_LINK}">Recipe &rarr;</a>')
+            if pin:
+                links.append(f'<a href="{_esc(pin)}" target="_blank" style="{_LINK}">Pinterest pin &rarr;</a>')
+            if links:
+                P.append('<p style="margin:0;font-size:14px;">' + " &nbsp;&nbsp; ".join(links) + "</p>")
         P.append(_side_block(sides[i] if i < len(sides) else None, week_veggies))
         ings = [re.sub(r"\s+", " ", x).strip() for x in r.get("ingredients", []) if x.strip()]
         if ings:
@@ -310,4 +331,4 @@ def render_html(plan, week_veggies, week_label="This Week's Dinners"):
                                    buckets["pantry"], pantry=True))
     P.append("</td></tr></table></td></tr>")
     P.append("</table></td></tr></table></body></html>")
-    return "\n".join(P)
+    return "\n".join(P), inline_images

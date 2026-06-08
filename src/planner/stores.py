@@ -42,6 +42,13 @@ def read_raw_email(bucket, key):
     return _client("s3").get_object(Bucket=bucket, Key=key)["Body"].read()
 
 
+# ---- photos ----
+
+def get_photo(s3_key):
+    """Bytes of a cookbook dish photo stored under cookbook-photos/ (for inline email embed)."""
+    return _client("s3").get_object(Bucket=config.BUCKET, Key=s3_key)["Body"].read()
+
+
 # ---- history (no-repeat window) ----
 
 def recent_recipe_ids(weeks):
@@ -102,17 +109,50 @@ def archive_html(html, sk_date):
 
 # ---- email ----
 
-def send_email(subject, html_body, text_body=None):
-    return _client("ses").send_email(
-        Source=config.get("FROM_EMAIL"),
-        Destination={"ToAddresses": [config.get("RECIPIENT_EMAIL")]},
-        Message={
-            "Subject": {"Data": subject},
-            "Body": {
-                "Html": {"Data": html_body},
-                **({"Text": {"Data": text_body}} if text_body else {}),
+def send_email(subject, html_body, text_body=None, inline_images=None):
+    """Send the plan email. With no inline_images, a plain SES SendEmail.
+
+    inline_images is a list of {"cid": ..., "data": <bytes>} (cookbook dish photos): the
+    HTML references each as <img src="cid:...">, so we build a multipart/related MIME and
+    send via SendRawEmail (the only SES path that supports inline attachments)."""
+    src = config.get("FROM_EMAIL")
+    to = config.get("RECIPIENT_EMAIL")
+    if not inline_images:
+        return _client("ses").send_email(
+            Source=src,
+            Destination={"ToAddresses": [to]},
+            Message={
+                "Subject": {"Data": subject},
+                "Body": {
+                    "Html": {"Data": html_body},
+                    **({"Text": {"Data": text_body}} if text_body else {}),
+                },
             },
-        },
+        ).get("MessageId")
+
+    from email.mime.image import MIMEImage
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    root = MIMEMultipart("related")
+    root["Subject"] = subject
+    root["From"] = src
+    root["To"] = to
+    alt = MIMEMultipart("alternative")
+    root.attach(alt)
+    if text_body:
+        alt.attach(MIMEText(text_body, "plain", "utf-8"))
+    alt.attach(MIMEText(html_body, "html", "utf-8"))
+    for img in inline_images:
+        part = MIMEImage(img["data"], "jpeg")   # import_cookbook always uploads JPEG
+        part.add_header("Content-ID", f"<{img['cid']}>")
+        part.add_header("Content-Disposition", "inline")
+        root.attach(part)
+
+    return _client("ses").send_raw_email(
+        Source=src,
+        Destinations=[to],
+        RawMessage={"Data": root.as_bytes()},
     ).get("MessageId")
 
 

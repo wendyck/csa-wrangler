@@ -44,10 +44,12 @@ def _process(message_id, subject, date_header):
     recent = stores.recent_recipe_ids(config.no_repeat_weeks())
     plan = planner.build_plan(info["veggies"], corpus, recent, config.nights_per_week())
 
-    html = render.render_html(plan, info["veggies"], week_label=week_label)
+    html, inline_images = render.render_html(plan, info["veggies"], week_label=week_label)
     html_key = stores.archive_html(html, sk)
     subject_line = f"🥕 {week_label} — {len(plan['recipes'])} dinners"
-    msg_id = stores.send_email(subject_line, html)
+    # Fetch cookbook dish photos from S3 so they can be embedded inline (cid:) in the email.
+    photos = [{"cid": im["cid"], "data": stores.get_photo(im["s3_key"])} for im in inline_images]
+    msg_id = stores.send_email(subject_line, html, inline_images=photos)
     stores.log_plan(plan, sk, week_label, msg_id, html_key)
 
     if plan["veggies_uncovered"]:
@@ -107,7 +109,7 @@ if __name__ == "__main__":
     corpus = json.load(open(sys.argv[2]))
     info = parse.parse_email(raw)
     plan = planner.build_plan(info["veggies"], corpus, set(), 6)
-    html = render.render_html(plan, info["veggies"], week_label=info["week_label"])
+    html, _ = render.render_html(plan, info["veggies"], week_label=info["week_label"])
     out = sys.argv[3] if len(sys.argv) > 3 else "plan.html"
     open(out, "w").write(html)
     print(f"{info['week_label']}: veggies={info['veggies']} -> {len(plan['recipes'])} dinners")

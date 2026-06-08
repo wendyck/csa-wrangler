@@ -227,6 +227,7 @@ recipes_tagged.json
 paywalled_worklist.csv
 needs_manual*.csv
 add_failures.csv
+import_failures.csv
 recipe_ratings.html
 ratings.json
 recipe_edits.json
