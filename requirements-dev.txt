@@ -1,3 +1,4 @@
 # Test / development tooling.
 #   pip install -r requirements-dev.txt
 pytest==9.1.1
+boto3==1.42.97   # tests exercise real stores.py; matches the Lambda python3.13 runtime
