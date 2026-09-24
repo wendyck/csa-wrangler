@@ -26,6 +26,29 @@ def _sk_date(date_header):
     return date.today().isoformat()
 
 
+_REQUIRED_VERDICTS = ("spamVerdict", "virusVerdict", "spfVerdict", "dkimVerdict", "dmarcVerdict")
+
+
+def _sender_authorized(record):
+    """True only if SES scanned the message clean AND the envelope sender is allowlisted.
+
+    Fails closed: a missing receipt, a missing/non-PASS verdict, or an empty allowlist
+    (ALLOWED_SENDERS in SSM) all reject.
+    """
+    receipt = record.get("receipt") or {}
+    for name in _REQUIRED_VERDICTS:
+        status = (receipt.get(name) or {}).get("status")
+        if status != "PASS":
+            log.warning("rejecting message: %s is %r", name, status)
+            return False
+    allowed = {a.strip().lower() for a in config.get("ALLOWED_SENDERS").split(",") if a.strip()}
+    source = (record.get("mail", {}).get("source") or "").strip().lower()
+    if not allowed or source not in allowed:
+        log.warning("rejecting message from unallowlisted source %r", source)
+        return False
+    return True
+
+
 def _process(message_id, subject, date_header):
     raw = stores.read_raw_email(config.BUCKET, config.RAW_PREFIX + message_id)
     info = parse.parse_email(raw)
@@ -68,6 +91,11 @@ def lambda_handler(event, context):
     headers = mail.get("commonHeaders", {})
     subject = headers.get("subject", "")
     date_header = headers.get("date", "")
+
+    # Gate before any side effect — a rejected message neither claims a dedup slot
+    # nor triggers a diagnostic send.
+    if not _sender_authorized(record):
+        return {"status": "rejected", "messageId": message_id}
 
     if stores.already_processed(message_id):
         log.info("duplicate delivery %s — skipping", message_id)
