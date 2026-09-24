@@ -26,6 +26,7 @@ _DEFAULTS = {
     "NIGHTS_PER_WEEK": "6",
     "NO_REPEAT_WEEKS": "5",
     "CORPUS_S3_KEY": "corpus/recipes_tagged.json",
+    "ALLOWED_SENDERS": "",   # comma-separated envelope senders; empty = reject all inbound
 }
 
 
