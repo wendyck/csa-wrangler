@@ -16,6 +16,7 @@ Merges into recipes_enriched.json (same shape as pass 1). Anything still failing
 goes to needs_manual_final.csv.
 """
 import json, csv, time, re, argparse, http.cookiejar, html as ihtml
+from urllib.parse import urlparse
 import requests
 from recipe_scrapers import scrape_html
 
@@ -97,7 +98,8 @@ def enrich(sess, url):
     fb = jsonld_fallback(html)
     if fb:
         return fb
-    if "seattletimes.com" in url:
+    host = urlparse(url).hostname or ""
+    if host == "seattletimes.com" or host.endswith(".seattletimes.com"):
         fb = seattletimes_fallback(html)
         if fb:
             return fb
