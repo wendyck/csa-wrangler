@@ -5,7 +5,6 @@ SES receipt rule writes the raw MIME to S3 (S3Action) and then invokes this func
 plan, email it, archive the HTML, and log the plan to history. Idempotent on the SES
 message id so retries don't double-send.
 """
-import email.utils
 import json
 import logging
 from datetime import date, datetime
@@ -16,14 +15,17 @@ log = logging.getLogger()
 log.setLevel(logging.INFO)
 
 
-def _sk_date(date_header):
-    """ISO date for the plan's sort key, from the email Date header (fallback: today)."""
-    if date_header:
-        try:
-            return email.utils.parsedate_to_datetime(date_header).date().isoformat()
-        except Exception:
-            pass
-    return date.today().isoformat()
+def _sk_from_receipt(mail):
+    """Plan storage key from server-assigned values: SES receipt date + messageId.
+
+    Never derived from the sender-controlled Date header, so two messages can't collide
+    on (and overwrite) the same plan, and a far-future date can't evict the no-repeat window.
+    """
+    try:
+        day = datetime.fromisoformat(mail["timestamp"].replace("Z", "+00:00")).date().isoformat()
+    except Exception:
+        day = date.today().isoformat()
+    return f"{day}#{mail['messageId']}"
 
 
 _REQUIRED_VERDICTS = ("spamVerdict", "virusVerdict", "spfVerdict", "dkimVerdict", "dmarcVerdict")
@@ -49,11 +51,13 @@ def _sender_authorized(record):
     return True
 
 
-def _process(message_id, subject, date_header):
+def _process(mail, subject, date_header):
+    message_id = mail["messageId"]
     raw = stores.read_raw_email(config.BUCKET, config.RAW_PREFIX + message_id)
     info = parse.parse_email(raw)
     week_label = info["week_label"] or subject or "CSA Share"
-    sk = _sk_date(info.get("date") or date_header)
+    sk = _sk_from_receipt(mail)
+    claimed_date = str(info.get("date") or date_header or "")   # display only
 
     if not info["veggies"]:
         stores.send_diagnostic(
@@ -73,7 +77,7 @@ def _process(message_id, subject, date_header):
     # Fetch cookbook dish photos from S3 so they can be embedded inline (cid:) in the email.
     photos = [{"cid": im["cid"], "data": stores.get_photo(im["s3_key"])} for im in inline_images]
     msg_id = stores.send_email(subject_line, html, inline_images=photos)
-    stores.log_plan(plan, sk, week_label, msg_id, html_key)
+    stores.log_plan(plan, sk, week_label, msg_id, html_key, claimed_date)
 
     if plan["veggies_uncovered"]:
         log.warning("uncovered veggies %s for %s", plan["veggies_uncovered"], sk)
@@ -102,7 +106,7 @@ def lambda_handler(event, context):
         return {"status": "duplicate", "messageId": message_id}
 
     try:
-        return _process(message_id, subject, date_header)
+        return _process(mail, subject, date_header)
     except parse.NoShareLine as exc:
         # Expected: a non-CSA email (or a format change). Send a heads-up but treat as
         # handled — returning normally avoids SES retries, the DLQ, and the error alarm.

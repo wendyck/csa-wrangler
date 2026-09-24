@@ -1,7 +1,7 @@
 """AWS-backed data stores and email I/O (ARCHITECTURE §3, §4.7, §9).
 
   - corpus: read recipes_tagged.json from S3 (cached per cold start)
-  - history: DynamoDB single table — plan rows (pk="PLAN", sk=ISO date) power the
+  - history: DynamoDB single table — plan rows (pk="PLAN", sk="<receipt ISO date>#<ses message id>") power the
     no-repeat window; idempotency rows (pk="SEEN", sk=ses_message_id, with TTL)
   - archive: write rendered HTML to S3
   - email: send the plan (and diagnostics) via SES
@@ -10,9 +10,12 @@ boto3 clients are created lazily so the pure-logic modules import without AWS.
 """
 import functools
 import json
+import logging
 import time
 
 from . import config
+
+log = logging.getLogger(__name__)
 
 _NO_REPEAT_DAYS_TTL = 400 * 24 * 3600  # idempotency rows expire well after the season
 
@@ -66,19 +69,24 @@ def recent_recipe_ids(weeks):
     return ids
 
 
-def log_plan(plan, sk_date, week_label, ses_message_id, html_s3_key):
-    _table().put_item(Item={
-        "pk": "PLAN",
-        "sk": sk_date,
-        "recipe_ids": plan["recipe_ids"],
-        "side_ids": plan.get("side_ids", []),
-        "proteins": plan["proteins"],
-        "veggies_covered": plan["veggies_covered"],
-        "week_label": week_label,
-        "ses_message_id": ses_message_id or "",
-        "html_s3_key": html_s3_key,
-        "created_at": int(time.time()),
-    })
+def log_plan(plan, sk, week_label, ses_message_id, html_s3_key, claimed_date=""):
+    """Record a plan. Never replaces an existing row; a repeat write is a benign duplicate."""
+    try:
+        _table().put_item(Item={
+            "pk": "PLAN",
+            "sk": sk,
+            "recipe_ids": plan["recipe_ids"],
+            "side_ids": plan.get("side_ids", []),
+            "proteins": plan["proteins"],
+            "veggies_covered": plan["veggies_covered"],
+            "week_label": week_label,
+            "ses_message_id": ses_message_id or "",
+            "html_s3_key": html_s3_key,
+            "claimed_date": claimed_date,   # sender's Date header — display only, never a key
+            "created_at": int(time.time()),
+        }, ConditionExpression="attribute_not_exists(sk)")
+    except _client("dynamodb").exceptions.ConditionalCheckFailedException:
+        log.warning("plan row %s already exists — not overwriting", sk)
 
 
 # ---- idempotency ----
@@ -100,10 +108,11 @@ def already_processed(message_id):
 
 # ---- archive ----
 
-def archive_html(html, sk_date):
-    key = f"{config.ARCHIVE_PREFIX}{sk_date}.html"
+def archive_html(html, sk):
+    """Write the rendered plan under a per-message key; IfNoneMatch refuses to overwrite."""
+    key = f"{config.ARCHIVE_PREFIX}{sk.replace('#', '_')}.html"
     _client("s3").put_object(Bucket=config.BUCKET, Key=key, Body=html.encode("utf-8"),
-                             ContentType="text/html; charset=utf-8")
+                             ContentType="text/html; charset=utf-8", IfNoneMatch="*")
     return key
 
 
