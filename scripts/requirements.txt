@@ -4,4 +4,4 @@
 recipe-scrapers==15.12.0
 requests==2.34.2
 anthropic>=1.6.0            # vision OCR for import_cookbook.py
-boto3>=1.43.69                # S3 upload of cookbook photos + corpus (import_cookbook.py)
+boto3>=1.43.100                # S3 upload of cookbook photos + corpus (import_cookbook.py)
