@@ -28,24 +28,42 @@ class NoShareLine(ValueError):
     CSA changed its format). Handled as a diagnostic, not an unexpected error."""
 
 
-_SHARE_RE = re.compile(r"share\s+contents?\s*:\s*(.*?)(?:\.\s|\.\*|\.$|\n\n)", re.I | re.S)
-_PAREN_RE = re.compile(r"\([^)]*\)")
-_TAG_RE = re.compile(r"<[^>]+>")
+# Opening delimiter excluded from the inner class and repetition bounded, so an
+# unterminated "(" or "<" can't make these rescan the rest of the input (O(n^2)).
+_PAREN_RE = re.compile(r"\([^()]{0,200}\)")
+_TAG_RE = re.compile(r"<[^<>]{0,200}>")
+
+# Input bounds — a real share email is a few KB.
+MAX_PARTS = 50
+MAX_BODY_CHARS = 512_000
+MAX_SHARE_LINE = 4_000
+MAX_ITEM_CHARS = 200
+MAX_SHARE_LABELS = 5   # "Share contents:" occurrences tried before giving up
+
+# Label and payload are matched separately so each label scans at most MAX_SHARE_LINE
+# chars for the terminating period, instead of the whole rest of the body.
+_SHARE_LABEL_RE = re.compile(r"share\s+contents?\s*:\s*", re.I)
+_SHARE_BODY_RE = re.compile(r"(.{0,%d}?)(?:\.\s|\.\*|\.$|\n\n)" % MAX_SHARE_LINE, re.S)
 
 
 def _body_text(msg):
     """Best-effort plain-text body: prefer text/plain, else strip tags from text/html."""
     plain, html = [], []
-    for part in msg.walk():
+    total = 0
+    for n, part in enumerate(msg.walk()):
+        if n >= MAX_PARTS or total >= MAX_BODY_CHARS:
+            break
         ctype = part.get_content_type()
         if ctype == "text/plain":
             try:
-                plain.append(part.get_content())
+                plain.append(part.get_content()[:MAX_BODY_CHARS - total])
+                total += len(plain[-1])
             except Exception:
                 pass
         elif ctype == "text/html":
             try:
-                html.append(part.get_content())
+                html.append(part.get_content()[:MAX_BODY_CHARS - total])
+                total += len(html[-1])
             except Exception:
                 pass
     if plain:
@@ -57,17 +75,20 @@ def _body_text(msg):
 
 def extract_share_line(text):
     """Return the raw 'Share contents:' payload (without the trailing period), or None."""
-    m = _SHARE_RE.search(text)
-    if not m:
-        return None
-    return re.sub(r"\s+", " ", m.group(1)).strip().rstrip(".")
+    for n, label in enumerate(_SHARE_LABEL_RE.finditer(text)):
+        if n >= MAX_SHARE_LABELS:
+            break
+        m = _SHARE_BODY_RE.match(text, label.end())
+        if m:
+            return re.sub(r"\s+", " ", m.group(1)).strip().rstrip(".")
+    return None
 
 
 def split_items(share_line):
     """Split the share line into individual item strings on commas and 'and'."""
     # Normalize the Oxford-comma 'and' and any bare ' and ' to a comma, then split.
     s = re.sub(r"\s*,?\s+and\s+", ",", share_line, flags=re.I)
-    items = [i.strip() for i in s.split(",")]
+    items = [i.strip()[:MAX_ITEM_CHARS] for i in s.split(",")]
     return [i for i in items if i]
 
 

@@ -57,6 +57,8 @@ def calls(monkeypatch):
     stub("send_email", "ses-id")
     stub("send_diagnostic")
     stub("log_plan")
+    stub("mark_done")
+    stub("release_claim")
     monkeypatch.setattr(planner, "build_plan", lambda *a, **kw: {
         "recipes": [{}], "recipe_ids": ["r1"], "veggies_uncovered": [],
         "veggies_covered": [], "forced_repeats": [], "proteins": []})
@@ -108,15 +110,37 @@ class _FakeDynamo:
 
 
 class _FakeTable:
-    """put_item honours attribute_not_exists(sk); query returns sk-descending like DynamoDB."""
+    """Honours the exact ConditionExpressions stores.py uses; query returns sk-descending
+    like DynamoDB."""
     def __init__(self):
         self.items = {}
 
-    def put_item(self, Item, ConditionExpression=None):
-        key = (Item["pk"], Item["sk"])
-        if ConditionExpression == "attribute_not_exists(sk)" and key in self.items:
+    def _check(self, key, cond, values):
+        row = self.items.get(key)
+        if cond is None:
+            return
+        if cond == "attribute_not_exists(sk)":
+            ok = row is None
+        elif cond == "attribute_not_exists(sk) OR (#s = :ip AND #t < :now)":
+            ok = row is None or (row.get("state") == values[":ip"] and row["ttl"] < values[":now"])
+        elif cond == "#s = :ip":
+            ok = row is not None and row.get("state") == values[":ip"]
+        else:
+            raise AssertionError(f"unexpected condition {cond!r}")
+        if not ok:
             raise _ConditionalCheckFailed()
+
+    def put_item(self, Item, ConditionExpression=None, ExpressionAttributeNames=None,
+                 ExpressionAttributeValues=None):
+        key = (Item["pk"], Item["sk"])
+        self._check(key, ConditionExpression, ExpressionAttributeValues)
         self.items[key] = Item
+
+    def delete_item(self, Key, ConditionExpression=None, ExpressionAttributeNames=None,
+                    ExpressionAttributeValues=None):
+        key = (Key["pk"], Key["sk"])
+        self._check(key, ConditionExpression, ExpressionAttributeValues)
+        self.items.pop(key, None)
 
     def query(self, KeyConditionExpression, ScanIndexForward, Limit):
         rows = sorted((v for (pk, _), v in self.items.items() if pk == "PLAN"),
@@ -131,17 +155,19 @@ class _FakeS3:
 
     def put_object(self, Bucket, Key, Body, ContentType, IfNoneMatch=None):
         if IfNoneMatch == "*" and Key in self.objects:
-            raise RuntimeError("PreconditionFailed")
+            from botocore.exceptions import ClientError
+            raise ClientError({"Error": {"Code": "PreconditionFailed"}}, "PutObject")
         self.objects[Key] = Body
 
 
 # The real write/read paths under test, captured before any fixture stubs them.
-_REAL = {n: getattr(stores, n) for n in ("log_plan", "archive_html", "recent_recipe_ids")}
+_REAL = {n: getattr(stores, n) for n in ("log_plan", "archive_html", "recent_recipe_ids",
+                                         "already_processed", "mark_done", "release_claim")}
 
 
 @pytest.fixture
 def aws(calls, monkeypatch):
-    """Real log_plan / archive_html / recent_recipe_ids over fake DynamoDB + S3."""
+    """Real history, archive and idempotency store functions over fake DynamoDB + S3."""
     table, s3 = _FakeTable(), _FakeS3()
     for name, fn in _REAL.items():
         monkeypatch.setattr(stores, name, fn)
@@ -192,3 +218,107 @@ def test_far_future_date_header_cannot_evict_no_repeat_window(aws, monkeypatch):
     app.lambda_handler(_event(message_id="m-far", timestamp="2026-06-01T00:00:00Z",
                               date="Fri, 31 Dec 9999 23:59:59 +0000"), None)
     assert stores.recent_recipe_ids(3) == {"genuine-0", "genuine-1", "genuine-2"}
+
+
+# ---- issue #32: oversized raw MIME is refused before it's read ----
+
+class _Body:
+    def __init__(self):
+        self.read_called = self.closed = False
+
+    def read(self):
+        self.read_called = True
+        return b""
+
+    def close(self):
+        self.closed = True
+
+
+def test_read_raw_email_refuses_oversized_object(monkeypatch):
+    body = _Body()
+    s3 = type("S3", (), {"get_object": lambda self, **kw: {
+        "ContentLength": stores.MAX_RAW_EMAIL_BYTES + 1, "Body": body}})()
+    monkeypatch.setattr(stores, "_client", lambda n: s3)
+    with pytest.raises(ValueError, match="limit"):
+        stores.read_raw_email("b", "k")
+    assert not body.read_called and body.closed
+
+
+# ---- issue #33: a failed run releases its idempotency claim so retries can recover ----
+
+def _seen(table, message_id="msg-1"):
+    return table.items.get(("SEEN", message_id))
+
+
+def test_failed_run_releases_claim_and_retry_sends(aws, calls, monkeypatch):
+    table, _ = aws
+    monkeypatch.setattr(stores, "load_corpus", lambda: (_ for _ in ()).throw(RuntimeError("s3 down")))
+    with pytest.raises(RuntimeError):
+        app.lambda_handler(_event(), None)
+    assert _seen(table) is None
+    assert calls.count("send_email") == 0
+
+    monkeypatch.setattr(stores, "load_corpus", lambda: [])   # dependency healthy again
+    assert app.lambda_handler(_event(), None)["status"] == "sent"
+    assert calls.count("send_email") == 1
+    assert _seen(table)["state"] == "done"
+
+
+def test_successful_run_is_done_and_redelivery_is_duplicate(aws, calls):
+    table, _ = aws
+    assert app.lambda_handler(_event(), None)["status"] == "sent"
+    assert _seen(table)["state"] == "done"
+    assert app.lambda_handler(_event(), None)["status"] == "duplicate"
+    assert calls.count("send_email") == 1
+
+
+def test_concurrent_delivery_is_suppressed_while_claim_is_live(aws, calls):
+    assert stores.already_processed("msg-1") is False      # another run holds the claim
+    assert app.lambda_handler(_event(), None)["status"] == "duplicate"
+    assert calls.count("send_email") == 0
+
+
+def test_expired_in_progress_claim_is_taken_over(aws, calls, monkeypatch):
+    table, _ = aws
+    table.items[("SEEN", "msg-1")] = {"pk": "SEEN", "sk": "msg-1", "state": "in_progress",
+                                      "ttl": 0}              # a run that crashed long ago
+    assert app.lambda_handler(_event(), None)["status"] == "sent"
+    assert calls.count("send_email") == 1
+
+
+def test_legacy_seen_row_without_state_counts_as_done(aws, calls):
+    table, _ = aws
+    table.items[("SEEN", "msg-1")] = {"pk": "SEEN", "sk": "msg-1", "ttl": 0}
+    assert app.lambda_handler(_event(), None)["status"] == "duplicate"
+
+
+def test_failure_after_send_does_not_let_retry_resend(aws, calls, monkeypatch):
+    table, _ = aws
+    monkeypatch.setattr(stores, "log_plan", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("ddb")))
+    with pytest.raises(RuntimeError):
+        app.lambda_handler(_event(), None)
+    assert _seen(table)["state"] == "done"
+    assert app.lambda_handler(_event(), None)["status"] == "duplicate"
+    assert calls.count("send_email") == 1
+
+
+def test_retry_after_archive_write_reuses_existing_object(aws, calls, monkeypatch):
+    table, s3 = aws
+    sends = iter([RuntimeError("ses throttled"), "ses-id"])
+    def send(*a, **kw):
+        r = next(sends)
+        if isinstance(r, Exception):
+            raise r
+        return r
+    monkeypatch.setattr(stores, "send_email", send)
+    with pytest.raises(RuntimeError):
+        app.lambda_handler(_event(), None)
+    assert list(s3.objects) == ["plan-archive/2026-06-02_msg-1.html"]
+    assert app.lambda_handler(_event(), None)["status"] == "sent"
+
+
+def test_unparseable_email_is_marked_done(aws, calls, monkeypatch):
+    table, _ = aws
+    monkeypatch.setattr(stores, "read_raw_email", lambda *a: b"Subject: hi\r\n\r\nnot a share\r\n")
+    assert app.lambda_handler(_event(), None)["status"] == "unparseable"
+    assert _seen(table)["state"] == "done"

@@ -28,6 +28,10 @@ Parameters:
   NoRepeatWeeks:
     Type: Number
     Default: 5
+  MonthlyBudgetUsd:
+    Type: Number
+    Default: 5
+    Description: Monthly AWS cost budget (USD). Normal spend is well under $1.
 
 Globals:
   Function:
@@ -54,6 +58,12 @@ Resources:
             Status: Enabled
             Prefix: raw-emails/
             ExpirationInDays: 90
+          # Rendered plans; the DynamoDB PLAN rows (the durable history) outlive these, so
+          # an old row's html_s3_key may point at an expired object.
+          - Id: expire-plan-archive
+            Status: Enabled
+            Prefix: plan-archive/
+            ExpirationInDays: 400
 
   # Allow SES inbound to write raw MIME under raw-emails/.
   BucketPolicy:
@@ -137,6 +147,8 @@ Resources:
       FunctionName: csa-wrangler-planner
       CodeUri: src/
       Handler: planner.app.lambda_handler
+      # No ReservedConcurrentExecutions, by choice: one run a week, and the account-level
+      # concurrency quota already bounds a burst (#35). Spend is watched by CostBudget.
       DeadLetterQueue:
         Type: SQS
         TargetArn: !GetAtt DLQ.Arn
@@ -218,6 +230,32 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions: [!Ref AlertTopic]
+
+  # Account-wide cost budget: emails RecipientEmail when actual spend passes half the
+  # budget, or when spend is forecast to exceed it (#35).
+  CostBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: csa-wrangler-monthly
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit: { Amount: !Ref MonthlyBudgetUsd, Unit: USD }
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 50
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - { SubscriptionType: EMAIL, Address: !Ref RecipientEmail }
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - { SubscriptionType: EMAIL, Address: !Ref RecipientEmail }
 
   # --- SES email identity + inbound receipt ----------------------------------
   EmailIdentity:

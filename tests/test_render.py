@@ -143,3 +143,18 @@ def test_real_week_render_smoke(corpus):
     assert "Grocery List" in html
     assert render._ACCENT in html and render._PAGE_BG in html  # literal palette, not CSS vars
     assert "var(--" not in html                    # Gmail ignores CSS variables
+
+
+# ---- issue #34: sink-side scheme allowlist for corpus URLs ----
+
+def test_non_http_urls_never_reach_href_or_src():
+    rec = {"title": "Kale", "recipe_url": "javascript:alert(1)", "pin_url": " JAVASCRIPT:x",
+           "recipe_image": "data:image/svg+xml,<svg/>", "ingredients": ["kale"],
+           "veggies": ["kale"], "protein": "", "id": "r1"}
+    side = {**rec, "id": "s1", "title": "Side"}
+    plan = {"recipes": [rec], "sides": [side], "grocery": {}, "veggies_covered": ["kale"],
+            "veggies_uncovered": [], "forced_repeats": []}
+    out, _ = render.render_html(plan, ["kale"])
+    low = out.lower()
+    assert "javascript:" not in low and "data:image" not in low
+    assert "no photo" in out

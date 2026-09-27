@@ -2,7 +2,7 @@
 
   - corpus: read recipes_tagged.json from S3 (cached per cold start)
   - history: DynamoDB single table — plan rows (pk="PLAN", sk="<receipt ISO date>#<ses message id>") power the
-    no-repeat window; idempotency rows (pk="SEEN", sk=ses_message_id, with TTL)
+    no-repeat window; idempotency rows (pk="SEEN", sk=ses_message_id, two-phase claim with TTL)
   - archive: write rendered HTML to S3
   - email: send the plan (and diagnostics) via SES
 
@@ -41,8 +41,15 @@ def load_corpus():
 
 # ---- raw email ----
 
+MAX_RAW_EMAIL_BYTES = 10 * 1024 * 1024  # a real share email is KB; forwards with images a few MB
+
+
 def read_raw_email(bucket, key):
-    return _client("s3").get_object(Bucket=bucket, Key=key)["Body"].read()
+    obj = _client("s3").get_object(Bucket=bucket, Key=key)
+    if obj["ContentLength"] > MAX_RAW_EMAIL_BYTES:
+        obj["Body"].close()
+        raise ValueError(f"raw email is {obj['ContentLength']} bytes (limit {MAX_RAW_EMAIL_BYTES})")
+    return obj["Body"].read()
 
 
 # ---- photos ----
@@ -90,29 +97,74 @@ def log_plan(plan, sk, week_label, ses_message_id, html_s3_key, claimed_date="")
 
 
 # ---- idempotency ----
+#
+# Two-phase claim: a run first writes a short-lived "in progress" row, and promotes it to
+# a long-lived "done" row once the plan email is out. A run that fails releases its claim;
+# one that crashes (timeout, OOM) leaves a claim that expires after _CLAIM_TTL, so SES's
+# async retries and a DLQ redrive can take over instead of short-circuiting as duplicates.
+
+_CLAIM_TTL = 90   # > the Lambda Timeout (60s) so a live run's claim is never taken over
+
 
 def already_processed(message_id):
-    """True if this SES message was already handled; otherwise claim it and return False."""
+    """True if this SES message is done or another run holds a live claim on it;
+    otherwise claim it (in progress) and return False."""
     if not message_id:
         return False
+    now = int(time.time())
     try:
         _table().put_item(
-            Item={"pk": "SEEN", "sk": message_id,
-                  "ttl": int(time.time()) + _NO_REPEAT_DAYS_TTL},
-            ConditionExpression="attribute_not_exists(sk)",
+            Item={"pk": "SEEN", "sk": message_id, "state": "in_progress", "ttl": now + _CLAIM_TTL},
+            # Rows written before the two-phase claim have no state and count as done.
+            ConditionExpression="attribute_not_exists(sk) OR (#s = :ip AND #t < :now)",
+            ExpressionAttributeNames={"#s": "state", "#t": "ttl"},
+            ExpressionAttributeValues={":ip": "in_progress", ":now": now},
         )
         return False
     except _client("dynamodb").exceptions.ConditionalCheckFailedException:
         return True
 
 
+def mark_done(message_id):
+    """Promote the claim to done, so no retry or redelivery re-does the work."""
+    if not message_id:
+        return
+    _table().put_item(Item={"pk": "SEEN", "sk": message_id, "state": "done",
+                            "ttl": int(time.time()) + _NO_REPEAT_DAYS_TTL})
+
+
+def release_claim(message_id):
+    """Drop an in-progress claim so an async retry or DLQ redrive can re-do the work.
+    A done claim is left alone — the plan email already went out."""
+    if not message_id:
+        return
+    try:
+        _table().delete_item(
+            Key={"pk": "SEEN", "sk": message_id},
+            ConditionExpression="#s = :ip",
+            ExpressionAttributeNames={"#s": "state"},
+            ExpressionAttributeValues={":ip": "in_progress"},
+        )
+    except _client("dynamodb").exceptions.ConditionalCheckFailedException:
+        pass
+
+
 # ---- archive ----
 
 def archive_html(html, sk):
-    """Write the rendered plan under a per-message key; IfNoneMatch refuses to overwrite."""
+    """Write the rendered plan under a per-message key; IfNoneMatch refuses to overwrite.
+
+    The key embeds the SES messageId, so an existing object can only be from an earlier
+    attempt at this same message (a retry) — keep it and carry on."""
+    from botocore.exceptions import ClientError
     key = f"{config.ARCHIVE_PREFIX}{sk.replace('#', '_')}.html"
-    _client("s3").put_object(Bucket=config.BUCKET, Key=key, Body=html.encode("utf-8"),
-                             ContentType="text/html; charset=utf-8", IfNoneMatch="*")
+    try:
+        _client("s3").put_object(Bucket=config.BUCKET, Key=key, Body=html.encode("utf-8"),
+                                 ContentType="text/html; charset=utf-8", IfNoneMatch="*")
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") != "PreconditionFailed":
+            raise
+        log.info("archive %s already exists (retry) — keeping it", key)
     return key
 
 

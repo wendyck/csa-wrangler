@@ -57,6 +57,7 @@ src/planner/        the Lambda package (CodeUri)
 template.yaml       AWS SAM stack (all infrastructure)
 scripts/            local tools (corpus building/tagging — not part of the Lambda)
   add_recipes.py    scrape + tag recipe URLs and merge into the corpus
+  recipe_guard.py   validation gate every scraper passes pages through before storing them
   recipe_tagging.py source of truth for the tagging vocabulary
 tests/              pytest suite (parser, planner, renderer)
 ```
@@ -170,7 +171,11 @@ aws s3 cp recipes_tagged.json s3://<bucket>/corpus/recipes_tagged.json
 
 `add_recipes.py` scrapes title/ingredients/image (via `recipe-scrapers`, with JSON-LD and
 microdata fallbacks), tags `veggies`/`protein`/`is_pasta`/`dish_type`, and merges into the
-corpus (deduped by URL; failures go to `add_failures.csv`). Requires `pip install -r
+corpus (deduped by URL; failures go to `add_failures.csv`). Every scraped page goes through
+`recipe_guard.py` first: non-HTML or >5 MB responses are refused, titles and ingredient lines
+are capped, and an image URL is kept only if it's on the recipe's own site or an exact host in
+`IMAGE_CDN_HOSTS` (otherwise it's stored as `None` and the email shows "no photo") — add a
+site's CDN host there if its photos stop appearing. Requires `pip install -r
 scripts/requirements.txt`. JavaScript-rendered recipe pages can't be scraped statically —
 those need a headless browser.
 
@@ -245,14 +250,18 @@ edge cases.
 
 ## Operations
 
-- **Idempotency** — SES/Lambda can retry; processed message ids are stored (with TTL) and
-  re-deliveries are no-ops, so you never get a duplicate plan.
+- **Idempotency** — SES/Lambda can retry. Each message id is claimed "in progress" on entry
+  and marked done once the plan email is sent, so re-deliveries are no-ops and you never get
+  a duplicate plan. A failed run releases its claim (and a crashed run's claim expires after
+  90s), so the async retries and a DLQ redrive genuinely re-run it.
 - **Diagnostics** — a non-CSA email (no `Share contents:` line) gets a brief "couldn't read
   this" reply and is otherwise ignored (no alarm).
 - **Failures** — unexpected errors send a diagnostic, land in the SQS DLQ, and raise the
   `csa-wrangler-planner-errors` CloudWatch alarm → SNS email.
 - **Updating recipes** — re-run `add_recipes.py` and re-upload the JSON; no redeploy.
-- **Cost** — effectively a few cents/month (per-event Lambda, on-demand DynamoDB, minimal S3/SES).
+- **Cost** — effectively a few cents/month (per-event Lambda, on-demand DynamoDB, minimal S3/SES). A
+  `csa-wrangler-monthly` AWS Budget (`MonthlyBudgetUsd`, default $5) emails the recipient if
+  actual spend passes 50% or forecast spend passes 100%.
 
 ## License
 
