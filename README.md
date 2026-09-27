@@ -245,8 +245,10 @@ edge cases.
 
 ## Operations
 
-- **Idempotency** — SES/Lambda can retry; processed message ids are stored (with TTL) and
-  re-deliveries are no-ops, so you never get a duplicate plan.
+- **Idempotency** — SES/Lambda can retry. Each message id is claimed "in progress" on entry
+  and marked done once the plan email is sent, so re-deliveries are no-ops and you never get
+  a duplicate plan. A failed run releases its claim (and a crashed run's claim expires after
+  90s), so the async retries and a DLQ redrive genuinely re-run it.
 - **Diagnostics** — a non-CSA email (no `Share contents:` line) gets a brief "couldn't read
   this" reply and is otherwise ignored (no alarm).
 - **Failures** — unexpected errors send a diagnostic, land in the SQS DLQ, and raise the

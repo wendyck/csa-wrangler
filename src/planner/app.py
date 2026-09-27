@@ -3,7 +3,7 @@
 SES receipt rule writes the raw MIME to S3 (S3Action) and then invokes this function
 (LambdaAction). We read the MIME from S3, parse the week's veggies, build and render the
 plan, email it, archive the HTML, and log the plan to history. Idempotent on the SES
-message id so retries don't double-send.
+message id (two-phase claim, see stores) so retries don't double-send but can recover.
 """
 import json
 import logging
@@ -77,6 +77,8 @@ def _process(mail, subject, date_header):
     # Fetch cookbook dish photos from S3 so they can be embedded inline (cid:) in the email.
     photos = [{"cid": im["cid"], "data": stores.get_photo(im["s3_key"])} for im in inline_images]
     msg_id = stores.send_email(subject_line, html, inline_images=photos)
+    # Done as soon as the email is out: a later failure must not let a retry send it again.
+    stores.mark_done(message_id)
     stores.log_plan(plan, sk, week_label, msg_id, html_key, claimed_date)
 
     if plan["veggies_uncovered"]:
@@ -106,7 +108,9 @@ def lambda_handler(event, context):
         return {"status": "duplicate", "messageId": message_id}
 
     try:
-        return _process(mail, subject, date_header)
+        result = _process(mail, subject, date_header)
+        stores.mark_done(message_id)
+        return result
     except parse.NoShareLine as exc:
         # Expected: a non-CSA email (or a format change). Send a heads-up but treat as
         # handled — returning normally avoids SES retries, the DLQ, and the error alarm.
@@ -119,6 +123,7 @@ def lambda_handler(event, context):
             )
         except Exception:
             log.exception("diagnostic email failed")
+        stores.mark_done(message_id)
         return {"status": "unparseable", "messageId": message_id}
     except Exception as exc:                       # noqa: BLE001 - want the DLQ + alarm
         log.exception("planner failed for %s", message_id)
@@ -129,6 +134,10 @@ def lambda_handler(event, context):
             )
         except Exception:
             log.exception("diagnostic email also failed")
+        try:
+            stores.release_claim(message_id)
+        except Exception:
+            log.exception("releasing the idempotency claim failed")
         raise                                      # re-raise so SES async retry + DLQ fire
 
 
