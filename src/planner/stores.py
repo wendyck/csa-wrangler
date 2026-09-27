@@ -41,8 +41,15 @@ def load_corpus():
 
 # ---- raw email ----
 
+MAX_RAW_EMAIL_BYTES = 10 * 1024 * 1024  # a real share email is KB; forwards with images a few MB
+
+
 def read_raw_email(bucket, key):
-    return _client("s3").get_object(Bucket=bucket, Key=key)["Body"].read()
+    obj = _client("s3").get_object(Bucket=bucket, Key=key)
+    if obj["ContentLength"] > MAX_RAW_EMAIL_BYTES:
+        obj["Body"].close()
+        raise ValueError(f"raw email is {obj['ContentLength']} bytes (limit {MAX_RAW_EMAIL_BYTES})")
+    return obj["Body"].read()
 
 
 # ---- photos ----

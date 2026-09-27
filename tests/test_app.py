@@ -192,3 +192,27 @@ def test_far_future_date_header_cannot_evict_no_repeat_window(aws, monkeypatch):
     app.lambda_handler(_event(message_id="m-far", timestamp="2026-06-01T00:00:00Z",
                               date="Fri, 31 Dec 9999 23:59:59 +0000"), None)
     assert stores.recent_recipe_ids(3) == {"genuine-0", "genuine-1", "genuine-2"}
+
+
+# ---- issue #32: oversized raw MIME is refused before it's read ----
+
+class _Body:
+    def __init__(self):
+        self.read_called = self.closed = False
+
+    def read(self):
+        self.read_called = True
+        return b""
+
+    def close(self):
+        self.closed = True
+
+
+def test_read_raw_email_refuses_oversized_object(monkeypatch):
+    body = _Body()
+    s3 = type("S3", (), {"get_object": lambda self, **kw: {
+        "ContentLength": stores.MAX_RAW_EMAIL_BYTES + 1, "Body": body}})()
+    monkeypatch.setattr(stores, "_client", lambda n: s3)
+    with pytest.raises(ValueError, match="limit"):
+        stores.read_raw_email("b", "k")
+    assert not body.read_called and body.closed

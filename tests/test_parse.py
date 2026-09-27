@@ -58,3 +58,48 @@ def test_parse_email_raises_noshareline_for_non_csa():
     with pytest.raises(parse.NoShareLine):
         parse.parse_email(raw)
     assert issubclass(parse.NoShareLine, ValueError)  # stays catchable as ValueError
+
+
+# ---- issue #32: bounded input, no quadratic backtracking ----
+
+import time
+
+import pytest
+
+
+def _mime(body, ctype="text/plain"):
+    return (f"Subject: CSA\r\nContent-Type: {ctype}; charset=utf-8\r\n\r\n".encode()
+            + body.encode())
+
+
+@pytest.mark.parametrize("body,ctype", [
+    ("Share contents: " + "(" * 1_000_000 + ".\n", "text/plain"),   # _PAREN_RE
+    ("Share contents: kale.\n" + "<" * 1_000_000, "text/html"),     # _TAG_RE
+    ("Share contents: " + " " * 1_000_000 + "and kale.\n", "text/plain"),  # split_items
+    ("share contents:" * 70_000, "text/plain"),                      # _SHARE_RE, no terminator
+], ids=["paren", "tag", "and-split", "share-label"])
+def test_parse_email_on_1mb_adversarial_body_is_fast(body, ctype):
+    start = time.perf_counter()
+    try:
+        parse.parse_email(_mime(body, ctype))
+    except parse.NoShareLine:
+        pass
+    assert time.perf_counter() - start < 1.0
+
+
+def test_items_and_share_line_are_capped():
+    info = parse.parse_email(_mime("Share contents: kale, " + "x" * 3_990 + ".\n"))
+    assert len(info["share_line"]) <= parse.MAX_SHARE_LINE
+    assert all(len(i) <= parse.MAX_ITEM_CHARS for i in info["raw_items"])
+
+
+def test_mime_part_count_is_capped():
+    parts = "".join(f"--b\r\nContent-Type: text/plain\r\n\r\nfiller {i}\r\n" for i in range(500))
+    raw = (b"Subject: CSA\r\nContent-Type: multipart/mixed; boundary=b\r\n\r\n"
+           + parts.encode() + b"--b\r\nContent-Type: text/plain\r\n\r\nShare contents: kale.\n\r\n--b--\r\n")
+    with pytest.raises(parse.NoShareLine):   # share line sits past MAX_PARTS, so it's never read
+        parse.parse_email(raw)
+
+
+def test_real_shares_still_parse_with_parentheticals():
+    assert parse.normalize_item("kale (lacinato or curly)") == parse.normalize_item("kale")
