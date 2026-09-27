@@ -13,6 +13,7 @@ Resumable: re-running skips URLs already enriched. Failures -> needs_manual.csv.
 import json, csv, time, re, sys
 import requests
 from recipe_scrapers import scrape_html  # pip install recipe-scrapers
+from recipe_guard import clean_recipe, fetch_html
 
 IN   = "cooking_recipes.json"
 OUT  = "recipes_enriched.json"
@@ -41,9 +42,11 @@ def jsonld_fallback(html, url):
     return None
 
 def enrich(url):
-    r = requests.get(url, headers={"User-Agent": UA}, timeout=20)
-    r.raise_for_status()
-    html = r.text
+    """Fetch + extract, then gate through recipe_guard before anything is stored."""
+    html = fetch_html(requests.get, url, headers={"User-Agent": UA}, timeout=20)
+    return clean_recipe(extract(html, url), url)
+
+def extract(html, url):
     try:
         s = scrape_html(html, org_url=url)
         ings = s.ingredients()

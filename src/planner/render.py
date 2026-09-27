@@ -9,6 +9,7 @@ The Pinterest link is omitted when a recipe has no pin_url (covers the hand-adde
 """
 import html
 import re
+from urllib.parse import urlsplit
 
 from .recipe_tagging import _VEG_C
 
@@ -149,8 +150,16 @@ def build_grocery(recipes, week_veggies):
     return buckets
 
 
+def _safe_url(u):
+    """u if it's an http(s) URL, else None — keeps javascript:/data: etc. out of href/src
+    (html.escape leaves them intact)."""
+    if not isinstance(u, str) or urlsplit(u.strip()).scheme not in ("http", "https"):
+        return None
+    return u.strip()
+
+
 def _img_of(r):
-    return r.get("recipe_image") or r.get("pinterest_image")
+    return _safe_url(r.get("recipe_image")) or _safe_url(r.get("pinterest_image"))
 
 
 def _tag_of(r):
@@ -193,7 +202,7 @@ def _side_block(side, week_veggies):
         return ""
     uses = _uses_note(side, week_veggies)
     uses_txt = (" — uses your " + uses) if uses else ""
-    url = side.get("recipe_url")
+    url = _safe_url(side.get("recipe_url"))
     name = (f'<a href="{_esc(url)}" target="_blank" style="{_LINK}">{_esc(side.get("title"))} &rarr;</a>'
             if url else _esc(side.get("title")))
     return (f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
@@ -254,7 +263,7 @@ def render_html(plan, week_veggies, week_label="This Week's Dinners"):
 
     for i, r in enumerate(recipes):
         day = _DAYS[i] if i < len(_DAYS) else f"Night {i + 1}"
-        url, pin = r.get("recipe_url"), r.get("pin_url")
+        url, pin = _safe_url(r.get("recipe_url")), _safe_url(r.get("pin_url"))
         # A cookbook recipe's dish photo lives in S3 (private) and is embedded inline via
         # cid:; an online recipe hotlinks its image URL. cookbook_photo wins when present.
         cookbook_photo = r.get("photo_s3_key")

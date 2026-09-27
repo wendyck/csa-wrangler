@@ -19,6 +19,7 @@ import json, csv, time, re, argparse, http.cookiejar, html as ihtml
 from urllib.parse import urlparse
 import requests
 from recipe_scrapers import scrape_html
+from recipe_guard import clean_recipe, fetch_html
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
@@ -85,8 +86,11 @@ def seattletimes_fallback(html):
     return {"title": _og(html, "title"), "ingredients": ings, "image": _og(html, "image")}
 
 def enrich(sess, url):
-    r = sess.get(url, timeout=25); r.raise_for_status()
-    html = r.text
+    """Fetch + extract, then gate through recipe_guard before anything is stored."""
+    html = fetch_html(sess.get, url, timeout=25)
+    return clean_recipe(extract(html, url), url)
+
+def extract(html, url):
     try:
         s = scrape_html(html, org_url=url)
         ings = s.ingredients()

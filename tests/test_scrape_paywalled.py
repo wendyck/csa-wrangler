@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from test_recipe_guard import FakeResponse
+
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
 # A Seattle Times-style page: no JSON-LD, ingredients in a <ul> after an INGREDIENTS heading.
@@ -29,8 +31,8 @@ def scraper(monkeypatch):
 
 
 class FakeSession:
-    def get(self, url, timeout):
-        return types.SimpleNamespace(text=ST_HTML, raise_for_status=lambda: None)
+    def get(self, url, timeout, stream=False):
+        return FakeResponse(ST_HTML)
 
 
 @pytest.mark.parametrize("url", [

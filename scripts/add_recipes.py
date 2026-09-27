@@ -17,6 +17,7 @@ import requests
 from urllib.parse import urlsplit, urlunsplit
 from recipe_scrapers import scrape_html
 import recipe_tagging as rt
+from recipe_guard import clean_recipe, fetch_html
 
 UA = "Mozilla/5.0 (recipe-archiver; personal use)"
 DELAY = 1.5
@@ -56,19 +57,23 @@ def microdata(html):
     mi = re.search(r'og:image["\']\s+content=["\']([^"\']+)', html)
     return {"title": title, "ingredients": ings, "image": mi.group(1) if mi else None}
 
-def scrape(url):
-    r = requests.get(url, headers={"User-Agent": UA}, timeout=20); r.raise_for_status()
+def extract(html, url):
     try:
-        s = scrape_html(r.text, org_url=url)
+        s = scrape_html(html, org_url=url)
         if s.ingredients():
             return {"title": s.title(), "ingredients": s.ingredients(),
                     "image": s.image() if hasattr(s,"image") else None}
     except Exception: pass
-    fb = jsonld(r.text)
+    fb = jsonld(html)
     if fb and fb["ingredients"]: return fb
-    fb = microdata(r.text)
+    fb = microdata(html)
     if fb: return fb
     raise ValueError("no ingredients found")
+
+def scrape(url):
+    """Fetch + extract, then gate through recipe_guard before anything reaches the corpus."""
+    html = fetch_html(requests.get, url, headers={"User-Agent": UA}, timeout=20)
+    return clean_recipe(extract(html, url), url)
 
 def main():
     ap = argparse.ArgumentParser()

@@ -15,6 +15,8 @@ import argparse
 import html
 import json
 
+from recipe_guard import safe_url
+
 
 def key_of(rec):
     """Stable per-recipe key (matches apply_ratings.py): recipe_url, else title."""
@@ -23,13 +25,13 @@ def key_of(rec):
 
 
 def _img(rec):
-    return rec.get("recipe_image") or rec.get("pinterest_image") or ""
+    return safe_url(rec.get("recipe_image")) or safe_url(rec.get("pinterest_image"))
 
 
 def card_html(rec):
     k = html.escape(key_of(rec), quote=True)
     title = html.escape(rec.get("title") or "(untitled)")
-    url = html.escape(rec.get("recipe_url") or "", quote=True)
+    url = html.escape(safe_url(rec.get("recipe_url")), quote=True)
     img = html.escape(_img(rec), quote=True)
     init = rec.get("rating") if rec.get("rating") in ("up", "down") else "none"
     proto = html.escape((rec.get("protein") or "") + (" · pasta" if rec.get("is_pasta") else ""))
