@@ -259,7 +259,9 @@ edge cases.
 - **Failures** — unexpected errors send a diagnostic, land in the SQS DLQ, and raise the
   `csa-wrangler-planner-errors` CloudWatch alarm → SNS email.
 - **Updating recipes** — re-run `add_recipes.py` and re-upload the JSON; no redeploy.
-- **Cost** — effectively a few cents/month (per-event Lambda, on-demand DynamoDB, minimal S3/SES).
+- **Cost** — effectively a few cents/month (per-event Lambda, on-demand DynamoDB, minimal S3/SES). A
+  `csa-wrangler-monthly` AWS Budget (`MonthlyBudgetUsd`, default $5) emails the recipient if
+  actual spend passes 50% or forecast spend passes 100%.
 
 ## License
 
