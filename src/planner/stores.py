@@ -87,7 +87,10 @@ def put_corpus(corpus, etag):
 
 # ---- raw email ----
 
-MAX_RAW_EMAIL_BYTES = 10 * 1024 * 1024  # a real share email is KB; forwards with images a few MB
+# SES's own ceiling for an email stored to S3, so this never refuses a real delivery.
+# Photo-heavy CSA weeks run 5-21 MB (two ~10 MB JPEGs); a 21 MB email peaks at ~145 MB
+# while parsing (parse.py reads only the text parts), well inside the 512 MB Lambda.
+MAX_RAW_EMAIL_BYTES = 40 * 1024 * 1024
 
 
 def read_raw_email(bucket, key):
