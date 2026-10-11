@@ -52,18 +52,33 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
+      # Versioning is the undo button for corpus writes (bad push, buggy ingest): every
+      # overwritten corpus stays restorable for 90 days via the noncurrent-version rule below.
+      VersioningConfiguration:
+        Status: Enabled
       LifecycleConfiguration:
         Rules:
+          # With versioning on, expiry only adds a delete marker. NoncurrentDays: 1 then
+          # removes the email itself, so raw mail still lives ~90 days, not 90 + 90.
           - Id: expire-raw-emails
             Status: Enabled
             Prefix: raw-emails/
             ExpirationInDays: 90
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 1
           # Rendered plans; the DynamoDB PLAN rows (the durable history) outlive these, so
           # an old row's html_s3_key may point at an expired object.
           - Id: expire-plan-archive
             Status: Enabled
             Prefix: plan-archive/
             ExpirationInDays: 400
+          # Whole bucket: drop overwritten/deleted versions after 90 days, then the delete
+          # markers left behind, so old versions don't pile up.
+          - Id: expire-old-versions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 90
+            ExpiredObjectDeleteMarker: true
 
   # Allow SES inbound to write raw MIME under raw-emails/.
   BucketPolicy:
@@ -307,8 +322,8 @@ Outputs:
   BucketName:
     Value: !Ref Bucket
   CorpusUploadCommand:
-    Description: Post-deploy — upload the recipe corpus.
-    Value: !Sub "aws s3 cp recipes_tagged.json s3://${Bucket}/corpus/recipes_tagged.json"
+    Description: Post-deploy — upload the recipe corpus (first upload; later edits use pull/push).
+    Value: !Sub "python scripts/corpus_sync.py push --bucket ${Bucket} --corpus recipes_tagged.json"
   ActivateRuleSetCommand:
     Description: Post-deploy — SES rule sets can't be activated via CloudFormation.
     Value: !Sub "aws ses set-active-receipt-rule-set --rule-set-name ${ReceiptRuleSet} --region ${AWS::Region}"
