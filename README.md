@@ -48,6 +48,7 @@ errors go to a dead-letter queue and raise a CloudWatch alarm.
 ```
 src/planner/        the Lambda package (CodeUri)
   app.py            handler: SES event → parse → plan → render → send → archive → log
+  ingest.py         browser-extension endpoint: page HTML → extract → guard → tag → preview/save
   parse.py          CSA email → canonical week veggies
   planner.py        the planning algorithm (cover, protein cap, no-repeat, side-pairing)
   render.py         HTML email + grocery categorizer
@@ -62,7 +63,7 @@ scripts/            local tools (corpus building/tagging — not deployed); they
                     shared modules above from src/planner/, so there's one copy of each
   add_recipes.py    scrape + tag recipe URLs and merge into the corpus
   corpus_sync.py    pull the corpus from S3 / push it back (refused if S3 changed since the pull)
-tests/              pytest suite (parser, planner, renderer, extraction, guard, corpus sync)
+tests/              pytest suite (parser, planner, renderer, extraction, guard, corpus sync, ingest)
 ```
 
 > The recipe corpus (`recipes_tagged.json`) and any scraped data are **not** committed — they
