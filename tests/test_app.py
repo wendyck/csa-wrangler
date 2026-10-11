@@ -234,6 +234,14 @@ class _Body:
         self.closed = True
 
 
+def test_read_raw_email_accepts_photo_heavy_share_email(monkeypatch):
+    """Week 17 (Oct 2026) was 21,155,357 bytes: two ~10 MB photos. It must be read."""
+    s3 = type("S3", (), {"get_object": lambda self, **kw: {
+        "ContentLength": 21_155_357, "Body": type("B", (), {"read": lambda self: b"mime"})()}})()
+    monkeypatch.setattr(stores, "_client", lambda n: s3)
+    assert stores.read_raw_email("b", "k") == b"mime"
+
+
 def test_read_raw_email_refuses_oversized_object(monkeypatch):
     body = _Body()
     s3 = type("S3", (), {"get_object": lambda self, **kw: {
