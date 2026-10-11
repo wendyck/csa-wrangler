@@ -28,8 +28,8 @@ import tempfile
 
 from anthropic import Anthropic
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import recipe_tagging as rt
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))   # shared planner package
+from planner import recipe_tagging as rt  # noqa: E402
 
 CORPUS_KEY = "corpus/recipes_tagged.json"
 PHOTO_PREFIX = "cookbook-photos"

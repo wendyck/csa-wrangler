@@ -16,17 +16,13 @@ query string or trailing slash. Re-runnable and idempotent — unmatched URLs ar
 """
 import argparse
 import json
-from urllib.parse import urlsplit
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))   # shared planner package
+from planner.corpus import norm  # noqa: E402
 
 SETTABLE = {"dish_type", "protein", "is_pasta", "rating", "title"}
-
-
-def norm(u):
-    """Normalize a recipe URL for matching: ignore scheme (http/https), a leading 'www.',
-    query string, fragment, trailing slash, and case."""
-    s = urlsplit((u or "").strip().lower())
-    host = s.netloc[4:] if s.netloc.startswith("www.") else s.netloc
-    return host + s.path.rstrip("/")
 
 
 def main():

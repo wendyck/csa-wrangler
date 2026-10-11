@@ -15,11 +15,15 @@ RUN:
 Merges into recipes_enriched.json (same shape as pass 1). Anything still failing
 goes to needs_manual_final.csv.
 """
-import json, csv, time, re, argparse, http.cookiejar, html as ihtml
+import json, csv, time, re, argparse, http.cookiejar, html as ihtml, sys
+from pathlib import Path
 from urllib.parse import urlparse
 import requests
 from recipe_scrapers import scrape_html
-from recipe_guard import clean_recipe, fetch_html
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))   # shared planner package
+from planner.extract import jsonld  # noqa: E402
+from planner.recipe_guard import clean_recipe, fetch_html  # noqa: E402
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
@@ -41,29 +45,6 @@ def session_with_cookies(path):
 def _og(html, prop):
     m = re.search(r'og:%s"\s+content="([^"]+)"' % prop, html)
     return ihtml.unescape(m.group(1)) if m else None
-
-def jsonld_fallback(html):
-    """Pull recipeIngredient/name/image straight from JSON-LD."""
-    for m in re.findall(r'<script[^>]+application/ld\+json[^>]*>(.*?)</script>', html, re.S):
-        try:
-            data = json.loads(m.strip())
-        except Exception:
-            continue
-        nodes = (data if isinstance(data, list) else [data])
-        if isinstance(data, dict):
-            nodes = nodes + data.get("@graph", [])
-        for node in nodes:
-            if not isinstance(node, dict):
-                continue
-            t = node.get("@type", "")
-            if "Recipe" in (t if isinstance(t, list) else [t]):
-                ings = node.get("recipeIngredient") or node.get("ingredients") or []
-                img = node.get("image")
-                if isinstance(img, dict): img = img.get("url")
-                if isinstance(img, list): img = img[0].get("url") if isinstance(img[0], dict) else img[0]
-                if ings:
-                    return {"title": node.get("name"), "ingredients": ings, "image": img}
-    return None
 
 def seattletimes_fallback(html):
     """ST food articles list ingredients under an INGREDIENTS heading in a <ul>."""
@@ -99,7 +80,7 @@ def extract(html, url):
                     "image": s.image() if hasattr(s, "image") else None}
     except Exception:
         pass
-    fb = jsonld_fallback(html)
+    fb = jsonld(html)
     if fb:
         return fb
     host = urlparse(url).hostname or ""
