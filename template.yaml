@@ -162,6 +162,10 @@ Resources:
       FunctionName: csa-wrangler-planner
       CodeUri: src/
       Handler: planner.app.lambda_handler
+      # Photo-heavy CSA emails run up to ~21 MB; that week used 269 MB of 512. SES delivers
+      # up to 40 MB (stores.MAX_RAW_EMAIL_BYTES), est. ~400 MB, so double it for headroom.
+      # One run a week: the cost difference is negligible.
+      MemorySize: 1024
       # No ReservedConcurrentExecutions, by choice: one run a week, and the account-level
       # concurrency quota already bounds a burst (#35). Spend is watched by CostBudget.
       DeadLetterQueue:
