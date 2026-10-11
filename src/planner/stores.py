@@ -1,6 +1,6 @@
 """AWS-backed data stores and email I/O (ARCHITECTURE §3, §4.7, §9).
 
-  - corpus: read recipes_tagged.json from S3 (cached per cold start)
+  - corpus: read recipes_tagged.json from S3 (cached by ETag); conditional (If-Match) writes
   - history: DynamoDB single table — plan rows (pk="PLAN", sk="<receipt ISO date>#<ses message id>") power the
     no-repeat window; idempotency rows (pk="SEEN", sk=ses_message_id, two-phase claim with TTL)
   - archive: write rendered HTML to S3
@@ -32,11 +32,57 @@ def _table():
 
 
 # ---- corpus ----
+#
+# S3 is the corpus's source of truth. Readers cache it by ETag; writers read-modify-write
+# with If-Match so a concurrent change is refused instead of silently overwritten (bucket
+# versioning keeps every earlier copy).
 
-@functools.lru_cache(maxsize=1)
+class CorpusChanged(Exception):
+    """The S3 corpus changed between our read and our write; re-read and redo the change."""
+
+
+_corpus_cache = None   # (etag, corpus) from the last full read
+
+
+def _error_code(exc):
+    return exc.response.get("Error", {}).get("Code")
+
+
 def load_corpus():
+    """The corpus, re-downloaded only when S3's copy has changed (conditional GET), so a
+    warm Lambda sees newly saved recipes without paying for a full read every time."""
+    global _corpus_cache
+    from botocore.exceptions import ClientError
+    kw = {"IfNoneMatch": _corpus_cache[0]} if _corpus_cache else {}
+    try:
+        obj = _client("s3").get_object(Bucket=config.BUCKET, Key=config.get("CORPUS_S3_KEY"), **kw)
+    except ClientError as exc:
+        if _corpus_cache and _error_code(exc) in ("304", "NotModified"):
+            return _corpus_cache[1]
+        raise
+    _corpus_cache = (obj["ETag"], json.loads(obj["Body"].read()))
+    return _corpus_cache[1]
+
+
+def load_corpus_for_update():
+    """(corpus, etag), always freshly read — pass both to put_corpus after changing it."""
     obj = _client("s3").get_object(Bucket=config.BUCKET, Key=config.get("CORPUS_S3_KEY"))
-    return json.loads(obj["Body"].read())
+    return json.loads(obj["Body"].read()), obj["ETag"]
+
+
+def put_corpus(corpus, etag):
+    """Write the corpus only if S3 still holds the version read as `etag`; else CorpusChanged."""
+    from botocore.exceptions import ClientError
+    try:
+        _client("s3").put_object(Bucket=config.BUCKET, Key=config.get("CORPUS_S3_KEY"),
+                                 Body=json.dumps(corpus, indent=2).encode("utf-8"),
+                                 ContentType="application/json", IfMatch=etag)
+    except ClientError as exc:
+        # 412 PreconditionFailed: someone wrote first. 409 ConditionalRequestConflict: a
+        # conditional write raced ours in flight. Either way our read is stale.
+        if _error_code(exc) in ("PreconditionFailed", "ConditionalRequestConflict"):
+            raise CorpusChanged() from exc
+        raise
 
 
 # ---- raw email ----

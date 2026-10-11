@@ -61,7 +61,8 @@ template.yaml       AWS SAM stack (all infrastructure)
 scripts/            local tools (corpus building/tagging — not deployed); they import the
                     shared modules above from src/planner/, so there's one copy of each
   add_recipes.py    scrape + tag recipe URLs and merge into the corpus
-tests/              pytest suite (parser, planner, renderer, extraction, guard)
+  corpus_sync.py    pull the corpus from S3 / push it back (refused if S3 changed since the pull)
+tests/              pytest suite (parser, planner, renderer, extraction, guard, corpus sync)
 ```
 
 > The recipe corpus (`recipes_tagged.json`) and any scraped data are **not** committed — they
@@ -103,8 +104,8 @@ the exact commands):
 # 1. Activate the receipt rule set (SES allows only one active set per account/region)
 aws ses set-active-receipt-rule-set --rule-set-name csa-wrangler-ruleset --region us-west-2
 
-# 2. Upload the recipe corpus
-aws s3 cp recipes_tagged.json s3://<bucket-from-outputs>/corpus/recipes_tagged.json
+# 2. Upload the recipe corpus (first upload only — refused if S3 already has one)
+python scripts/corpus_sync.py push --bucket <bucket-from-outputs> --corpus recipes_tagged.json
 
 # 3. Verify the recipient address (SES sandbox only sends to verified addresses)
 aws ses verify-email-identity --email-address you@example.com --region us-west-2
@@ -145,7 +146,7 @@ domain once they resolve.
 ## Recipe corpus
 
 The corpus is a JSON array of recipe objects, stored at `s3://<bucket>/corpus/recipes_tagged.json`
-and loaded (and cached) by the Lambda. Each record:
+and loaded by the Lambda (cached, re-read whenever S3's copy changes). Each record:
 
 ```json
 {
@@ -162,13 +163,31 @@ and loaded (and cached) by the Lambda. Each record:
 }
 ```
 
+### Editing the corpus locally
+
+**S3 is the source of truth.** Every local edit below is pull → edit → push with
+`scripts/corpus_sync.py` (bucket from `--bucket` or `$CSA_BUCKET`):
+
+```bash
+export CSA_BUCKET=<bucket-from-outputs>
+python scripts/corpus_sync.py pull --corpus recipes_tagged.json   # also saves .recipes_tagged.etag
+# ... add / rate / curate (below) ...
+python scripts/corpus_sync.py push --corpus recipes_tagged.json
+```
+
+`push` is refused if S3 changed since your `pull` (e.g. a recipe saved from the browser), so
+nothing is silently overwritten. Pull again and redo your edits. `pull` overwrites the
+local file, so push (or set aside) local edits first. The bucket is versioned: any
+overwritten corpus can be restored for 90 days (`aws s3api list-object-versions --bucket <b>
+--prefix corpus/`).
+
 ### Adding recipes
 
 ```bash
 # one URL per line in a file (blank lines and #comments ignored)
 python scripts/add_recipes.py --urls urls.txt --corpus recipes_tagged.json
-# then re-upload (no redeploy needed):
-aws s3 cp recipes_tagged.json s3://<bucket>/corpus/recipes_tagged.json
+# then push (no redeploy needed):
+python scripts/corpus_sync.py push --corpus recipes_tagged.json
 ```
 
 `add_recipes.py` scrapes title/ingredients/image (via `recipe-scrapers`, with JSON-LD and
@@ -196,9 +215,9 @@ coverage, protein variety, 3-week no-repeat). To rate:
 python scripts/make_rating_page.py --corpus recipes_tagged.json --out recipe_ratings.html
 # 2. open recipe_ratings.html in a browser, click 👍/👎 per recipe (ratings persist in
 #    localStorage), then click "Download ratings JSON"
-# 3. merge the downloaded file into the corpus and re-upload
+# 3. merge the downloaded file into the corpus and push
 python scripts/apply_ratings.py --ratings ~/Downloads/ratings.json --corpus recipes_tagged.json
-aws s3 cp recipes_tagged.json s3://<bucket>/corpus/recipes_tagged.json
+python scripts/corpus_sync.py push --corpus recipes_tagged.json
 ```
 
 Re-runnable: regenerate the page anytime to rate more recipes as you cook; the page reflects
@@ -213,7 +232,7 @@ list them in a JSON edits file and run `curate_recipes.py`:
 # recipe_edits.json: [{"url": "…", "dish_type": "side"}, {"url": "…", "remove": true}, …]
 python scripts/curate_recipes.py --edits recipe_edits.json --corpus recipes_tagged.json --dry-run
 python scripts/curate_recipes.py --edits recipe_edits.json --corpus recipes_tagged.json
-aws s3 cp recipes_tagged.json s3://<bucket>/corpus/recipes_tagged.json
+python scripts/corpus_sync.py push --corpus recipes_tagged.json
 ```
 
 Settable fields: `dish_type`, `protein`, `is_pasta`, `rating`, `title`. URLs match regardless

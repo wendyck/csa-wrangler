@@ -12,7 +12,8 @@ and optionally a dish photo (`<name> photo.heic`, embedded inline in the plan em
   python3 scripts/import_cookbook.py --dry-run         # print extractions, touch nothing
 
 With --bucket, the live corpus is pulled from S3 first (so we append, never clobber); page
-and dish JPEGs are uploaded under cookbook-photos/, and the updated corpus is pushed back.
+and dish JPEGs are uploaded under cookbook-photos/, and the updated corpus is pushed back
+only if S3 hasn't changed since the pull (If-Match).
 Re-runnable: a cookbook+recipe already in the corpus is skipped. HEIC is converted to JPEG
 with macOS `sips` (no extra dependency). Failures -> import_failures.csv.
 """
@@ -127,15 +128,17 @@ def extract(client, model, page_jpeg, name_hint):
 
 
 def load_corpus(s3, bucket, path):
-    """Live corpus: pulled from S3 when --bucket is set (cached to `path`), else local/empty."""
+    """(corpus, etag). Live corpus pulled from S3 when --bucket is set (cached to `path`),
+    else local/empty with etag None. The etag makes the final upload conditional."""
     if s3 and bucket:
         try:
-            data = json.loads(s3.get_object(Bucket=bucket, Key=CORPUS_KEY)["Body"].read())
+            obj = s3.get_object(Bucket=bucket, Key=CORPUS_KEY)
+            data = json.loads(obj["Body"].read())
             json.dump(data, open(path, "w"), indent=2)
-            return data
+            return data, obj["ETag"]
         except s3.exceptions.NoSuchKey:
-            return []
-    return json.load(open(path)) if os.path.exists(path) else []
+            return [], None
+    return (json.load(open(path)) if os.path.exists(path) else []), None
 
 
 def main():
@@ -157,7 +160,7 @@ def main():
         import boto3
         s3 = boto3.client("s3")
 
-    corpus = load_corpus(s3, args.bucket, args.corpus)
+    corpus, etag = load_corpus(s3, args.bucket, args.corpus)
     have = {(r.get("cookbook"), r.get("title"))
             for r in corpus if r.get("source") == "cookbook"}
 
@@ -207,9 +210,20 @@ def main():
             print(f"  !! {cookbook} / {display} -> {ex}")
 
     if not args.dry_run and added:
-        s3.put_object(Bucket=args.bucket, Key=CORPUS_KEY,
-                      Body=json.dumps(corpus, indent=2).encode(),
-                      ContentType="application/json")
+        from botocore.exceptions import ClientError
+        # Only overwrite the version we pulled (or create it, if there was none), so a
+        # recipe saved elsewhere during the import isn't silently dropped.
+        cond = {"IfMatch": etag} if etag else {"IfNoneMatch": "*"}
+        try:
+            s3.put_object(Bucket=args.bucket, Key=CORPUS_KEY,
+                          Body=json.dumps(corpus, indent=2).encode(),
+                          ContentType="application/json", **cond)
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") not in ("PreconditionFailed",
+                                                                 "ConditionalRequestConflict"):
+                raise
+            sys.exit("S3 corpus changed during the import — not overwritten. Re-run to "
+                     "import onto the current corpus (photos are re-uploaded; harmless).")
         print(f"uploaded corpus -> s3://{args.bucket}/{CORPUS_KEY}")
     if fails:
         with open("import_failures.csv", "w", newline="") as f:

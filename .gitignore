@@ -239,3 +239,6 @@ recipe_edits.json
 
 # SAM deploy config — contains the AWS account id, profile, and recipient email
 samconfig.toml
+
+# corpus_sync.py: ETag of the last-pulled S3 corpus (.recipes_tagged.etag)
+.*.etag
