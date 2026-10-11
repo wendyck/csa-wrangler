@@ -246,6 +246,85 @@ Resources:
       TreatMissingData: notBreaching
       AlarmActions: [!Ref AlertTopic]
 
+  # --- The recipe ingest Lambda (browser extension) ---------------------------
+  # The Chrome extension POSTs a page it rendered; this extracts, guards and tags it and
+  # previews it or appends it to the corpus (planner/ingest.py).
+  IngestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: csa-wrangler-ingest
+      CodeUri: src/
+      Handler: planner.ingest.lambda_handler
+      MemorySize: 256
+      Timeout: 15
+      # AWS_IAM: Lambda checks the caller's SigV4 signature before the function runs, so
+      # unsigned requests cost nothing and can't use up the account's concurrency quota
+      # (which the planner shares). Only IngestUser below may invoke it. No CORS config:
+      # extension pages with host permission aren't subject to CORS.
+      FunctionUrlConfig:
+        AuthType: AWS_IAM
+      Environment:
+        Variables:
+          BUCKET: !Ref Bucket
+          SSM_PREFIX: /csa-wrangler
+      Policies:
+        - Statement:
+            - Effect: Allow
+              # Read + conditional (If-Match) write of the corpus object only, not the
+              # bucket's emails, plan archive or photos. Pinned to the CORPUS_S3_KEY default.
+              Action: [s3:GetObject, s3:PutObject]
+              Resource: !Sub "arn:aws:s3:::${Bucket}/corpus/recipes_tagged.json"
+            - Effect: Allow
+              # config.get reads CORPUS_S3_KEY. GetParametersByPath authorizes against the
+              # path node itself, so grant the node and the wildcard under it.
+              Action: [ssm:GetParameter, ssm:GetParametersByPath]
+              Resource:
+                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/csa-wrangler"
+                - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/csa-wrangler/*"
+
+  # The browser extension's identity: it signs requests with this user's access key,
+  # created by hand after deploy (an AWS::IAM::AccessKey here would expose the secret in
+  # stack state). Same-account caller, so this identity policy alone grants access.
+  IngestUser:
+    Type: AWS::IAM::User
+    Properties:
+      Policies:
+        - PolicyName: invoke-ingest-function-url
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Since Oct 2025 a function URL call needs both actions. Each is limited to
+              # this one function, and InvokeFunction only when it comes via its URL.
+              - Effect: Allow
+                Action: lambda:InvokeFunctionUrl
+                Resource: !GetAtt IngestFunction.Arn
+                Condition:
+                  StringEquals:
+                    lambda:FunctionUrlAuthType: AWS_IAM
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt IngestFunction.Arn
+                Condition:
+                  Bool:
+                    lambda:InvokedViaFunctionUrl: "true"
+
+  IngestErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: csa-wrangler-ingest-errors
+      AlarmDescription: Ingest Lambda raised an error (a bug, or S3 unavailable).
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - { Name: FunctionName, Value: !Ref IngestFunction }
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+
   # Account-wide cost budget: emails RecipientEmail when actual spend passes half the
   # budget, or when spend is forecast to exceed it (#35).
   CostBudget:
@@ -329,3 +408,9 @@ Outputs:
     Value: !Sub "aws ses set-active-receipt-rule-set --rule-set-name ${ReceiptRuleSet} --region ${AWS::Region}"
   RuleSetName:
     Value: !Ref ReceiptRuleSet
+  IngestUrl:
+    Description: Browser extension endpoint (paste into the extension's options).
+    Value: !GetAtt IngestFunctionUrl.FunctionUrl
+  IngestKeyCommand:
+    Description: Post-deploy — create the extension's access key (prints the secret once; store it safely).
+    Value: !Sub "aws iam create-access-key --user-name ${IngestUser}"
