@@ -10,36 +10,20 @@ Primary extractor: recipe-scrapers (handles ~hundreds of sites via their schema.
 Recipe / JSON-LD parsing). Fallback: parse JSON-LD <script> ourselves.
 Resumable: re-running skips URLs already enriched. Failures -> needs_manual.csv.
 """
-import json, csv, time, re, sys
+import json, csv, time, sys
+from pathlib import Path
 import requests
 from recipe_scrapers import scrape_html  # pip install recipe-scrapers
-from recipe_guard import clean_recipe, fetch_html
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))   # shared planner package
+from planner.extract import jsonld  # noqa: E402
+from planner.recipe_guard import clean_recipe, fetch_html  # noqa: E402
 
 IN   = "cooking_recipes.json"
 OUT  = "recipes_enriched.json"
 FAIL = "needs_manual.csv"
 DELAY = 1.5          # seconds between requests (be polite)
 UA = "Mozilla/5.0 (recipe-archiver; personal use)"
-
-def jsonld_fallback(html, url):
-    """Pull recipeIngredient/name/image straight from JSON-LD if recipe-scrapers misses."""
-    for m in re.findall(r'<script[^>]+application/ld\+json[^>]*>(.*?)</script>', html, re.S):
-        try:
-            data = json.loads(m.strip())
-        except Exception:
-            continue
-        for node in (data if isinstance(data, list) else [data]) + \
-                    (data.get("@graph", []) if isinstance(data, dict) else []):
-            if not isinstance(node, dict):
-                continue
-            t = node.get("@type", "")
-            if "Recipe" in (t if isinstance(t, list) else [t]):
-                ings = node.get("recipeIngredient") or node.get("ingredients") or []
-                img = node.get("image")
-                if isinstance(img, dict): img = img.get("url")
-                if isinstance(img, list): img = img[0].get("url") if isinstance(img[0], dict) else img[0]
-                return {"title": node.get("name"), "ingredients": ings, "image": img}
-    return None
 
 def enrich(url):
     """Fetch + extract, then gate through recipe_guard before anything is stored."""
@@ -55,8 +39,8 @@ def extract(html, url):
                     "image": (s.image() if hasattr(s, "image") else None)}
     except Exception:
         pass
-    fb = jsonld_fallback(html, url)
-    if fb and fb["ingredients"]:
+    fb = jsonld(html)
+    if fb:
         return fb
     raise ValueError("no ingredients found (likely paywalled or no recipe schema)")
 

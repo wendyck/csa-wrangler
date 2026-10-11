@@ -14,8 +14,11 @@ editor for later rating passes as you cook more meals.
 import argparse
 import html
 import json
+import sys
+from pathlib import Path
 
-from recipe_guard import safe_url
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))   # shared planner package
+from planner.recipe_guard import safe_url  # noqa: E402
 
 
 def key_of(rec):

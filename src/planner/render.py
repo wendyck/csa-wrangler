@@ -9,8 +9,8 @@ The Pinterest link is omitted when a recipe has no pin_url (covers the hand-adde
 """
 import html
 import re
-from urllib.parse import urlsplit
 
+from .recipe_guard import safe_url
 from .recipe_tagging import _VEG_C
 
 # Day labels, starting Sunday, for up to 7 nights.
@@ -151,11 +151,9 @@ def build_grocery(recipes, week_veggies):
 
 
 def _safe_url(u):
-    """u if it's an http(s) URL, else None — keeps javascript:/data: etc. out of href/src
-    (html.escape leaves them intact)."""
-    if not isinstance(u, str) or urlsplit(u.strip()).scheme not in ("http", "https"):
-        return None
-    return u.strip()
+    """u if it's an http(s) URL with a host, else None — keeps javascript:/data: etc. out of
+    href/src (html.escape leaves them intact). Same check the scrapers apply on the way in."""
+    return safe_url(u) or None
 
 
 def _img_of(r):

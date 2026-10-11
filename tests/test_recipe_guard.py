@@ -1,12 +1,13 @@
-"""Tests for scripts/recipe_guard.py — the scrape-to-corpus validation gate (issue #34)."""
+"""Tests for planner/recipe_guard.py — the scrape-to-corpus validation gate (issue #34)."""
 import json
 import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import recipe_guard as rg  # noqa: E402
+from planner import recipe_guard as rg
+
+SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
 
 class FakeResponse:
@@ -116,6 +117,7 @@ def add_recipes(monkeypatch):
     monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(
         get=lambda url, **kw: FakeResponse(CRAFTED_PAGE)))
     monkeypatch.setitem(sys.modules, "recipe_scrapers", types.SimpleNamespace(scrape_html=scrape_html))
+    monkeypatch.syspath_prepend(str(SCRIPTS))
     monkeypatch.delitem(sys.modules, "add_recipes", raising=False)
     return importlib.import_module("add_recipes")
 

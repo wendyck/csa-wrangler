@@ -53,13 +53,15 @@ src/planner/        the Lambda package (CodeUri)
   render.py         HTML email + grocery categorizer
   stores.py         S3 corpus/archive, DynamoDB history + idempotency, SES send
   config.py         config from SSM Parameter Store / env
-  recipe_tagging.py canonical veggie + protein vocabulary (shared with corpus tagging)
+  recipe_tagging.py source of truth for the veggie + protein tagging vocabulary
+  recipe_guard.py   validation gate every scraped page passes through before it's stored
+  extract.py        JSON-LD / microdata recipe extraction from page HTML; canonical page URL
+  corpus.py         corpus record building, overrides, URL dedup (norm/merge)
 template.yaml       AWS SAM stack (all infrastructure)
-scripts/            local tools (corpus building/tagging — not part of the Lambda)
+scripts/            local tools (corpus building/tagging — not deployed); they import the
+                    shared modules above from src/planner/, so there's one copy of each
   add_recipes.py    scrape + tag recipe URLs and merge into the corpus
-  recipe_guard.py   validation gate every scraper passes pages through before storing them
-  recipe_tagging.py source of truth for the tagging vocabulary
-tests/              pytest suite (parser, planner, renderer)
+tests/              pytest suite (parser, planner, renderer, extraction, guard)
 ```
 
 > The recipe corpus (`recipes_tagged.json`) and any scraped data are **not** committed — they
@@ -171,8 +173,8 @@ aws s3 cp recipes_tagged.json s3://<bucket>/corpus/recipes_tagged.json
 
 `add_recipes.py` scrapes title/ingredients/image (via `recipe-scrapers`, with JSON-LD and
 microdata fallbacks), tags `veggies`/`protein`/`is_pasta`/`dish_type`, and merges into the
-corpus (deduped by URL; failures go to `add_failures.csv`). Every scraped page goes through
-`recipe_guard.py` first: non-HTML or >5 MB responses are refused, titles and ingredient lines
+corpus (deduped by URL, ignoring scheme, `www.`, query and trailing slash; failures go to
+`add_failures.csv`). Every scraped page goes through `src/planner/recipe_guard.py` first: non-HTML or >5 MB responses are refused, titles and ingredient lines
 are capped, and an image URL is kept only if it's on the recipe's own site or an exact host in
 `IMAGE_CDN_HOSTS` (otherwise it's stored as `None` and the email shows "no photo") — add a
 site's CDN host there if its photos stop appearing. Requires `pip install -r

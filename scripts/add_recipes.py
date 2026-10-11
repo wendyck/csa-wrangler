@@ -11,51 +11,18 @@ Re-runnable: URLs already in the corpus are skipped. Failures -> add_failures.cs
 Manually-added recipes have no pin_url (source="manual") — the planner/email
 just shows the recipe link for those.
 """
-import json, csv, time, re, argparse
-import html as ihtml
+import json, csv, time, argparse, sys
+from pathlib import Path
 import requests
-from urllib.parse import urlsplit, urlunsplit
 from recipe_scrapers import scrape_html
-import recipe_tagging as rt
-from recipe_guard import clean_recipe, fetch_html
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))   # shared planner package
+from planner.corpus import make_record, merge, norm  # noqa: E402
+from planner.extract import extract_structured  # noqa: E402
+from planner.recipe_guard import clean_recipe, fetch_html  # noqa: E402
 
 UA = "Mozilla/5.0 (recipe-archiver; personal use)"
 DELAY = 1.5
-
-def norm(u):  # dedup key: drop query + fragment + trailing slash
-    s = urlsplit(u); return urlunsplit((s.scheme, s.netloc, s.path.rstrip("/"), "", "")).lower()
-
-def jsonld(html):
-    for m in re.findall(r'<script[^>]+application/ld\+json[^>]*>(.*?)</script>', html, re.S):
-        try: data = json.loads(m.strip())
-        except Exception: continue
-        stack = data if isinstance(data, list) else [data]
-        if isinstance(data, dict) and data.get("@graph"): stack += data["@graph"]
-        for n in stack:
-            if not isinstance(n, dict): continue
-            t = n.get("@type",""); t = t if isinstance(t, list) else [t]
-            if "Recipe" in t:
-                img = n.get("image")
-                if isinstance(img, dict): img = img.get("url")
-                if isinstance(img, list): img = img[0].get("url") if isinstance(img[0], dict) else img[0]
-                return {"title": n.get("name"), "ingredients": n.get("recipeIngredient") or [], "image": img}
-    return None
-
-def microdata(html):
-    """schema.org Microdata (e.g. WordPress Jetpack Recipe cards: smittenkitchen,
-    nigella). Ingredients carry itemprop="recipeIngredient"."""
-    ings = [ihtml.unescape(re.sub(r'<[^>]+>', '', m)).strip()
-            for m in re.findall(r'itemprop=["\']recipeIngredient["\'][^>]*>(.*?)</li>', html, re.S)]
-    ings = [i for i in ings if i]
-    if not ings:
-        return None
-    mt = re.search(r'itemprop=["\']name["\'][^>]*>(.*?)<', html, re.S)
-    title = ihtml.unescape(mt.group(1)).strip() if mt else None
-    if not title:
-        og = re.search(r'og:title["\']\s+content=["\']([^"\']+)', html)
-        title = ihtml.unescape(og.group(1)) if og else None
-    mi = re.search(r'og:image["\']\s+content=["\']([^"\']+)', html)
-    return {"title": title, "ingredients": ings, "image": mi.group(1) if mi else None}
 
 def extract(html, url):
     try:
@@ -64,11 +31,7 @@ def extract(html, url):
             return {"title": s.title(), "ingredients": s.ingredients(),
                     "image": s.image() if hasattr(s,"image") else None}
     except Exception: pass
-    fb = jsonld(html)
-    if fb and fb["ingredients"]: return fb
-    fb = microdata(html)
-    if fb: return fb
-    raise ValueError("no ingredients found")
+    return extract_structured(html)
 
 def scrape(url):
     """Fetch + extract, then gate through recipe_guard before anything reaches the corpus."""
@@ -91,12 +54,8 @@ def main():
             skipped += 1; print(f"[{i}/{len(urls)}] skip (already in corpus) {url[:60]}"); continue
         try:
             e = scrape(url)
-            rec = {"pin_url": "", "title": e["title"] or url, "recipe_url": url,
-                   "pinterest_image": None, "recipe_image": e["image"],
-                   "description": "", "ingredients": e["ingredients"],
-                   "source": "manual", "status": "enriched"}
-            rec.update(rt.tag(rec))   # veggies, protein, is_pasta, dish_type
-            corpus.append(rec); have.add(norm(url)); added += 1
+            rec = make_record(e, url, source="manual")
+            merge(corpus, rec); have.add(norm(url)); added += 1
             print(f"[{i}/{len(urls)}] OK [{rec['protein']}] {', '.join(rec['veggies']) or 'no veg'} | {rec['title'][:40]}")
         except Exception as ex:
             fails.append({"url": url, "error": str(ex)})
